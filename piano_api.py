@@ -1,4 +1,5 @@
 import os
+from json import JSONDecodeError
 from urllib.parse import urlparse, parse_qs, urlencode
 import requests
 
@@ -17,13 +18,16 @@ class PianoRequestException(PianoClientError):
     """Exception class for Piano Client errors."""
     pass
 
+class PianoResponseError(PianoClientError):
+    """Exception raised for authentication-related errors."""
+    pass
 
 class PianoAuthenticationError(PianoClientError):
     """Exception raised for authentication-related errors."""
     pass
 
 
-class Piano:
+class ESP:
     """
     Piano API client for making authenticated requests to the Piano API endpoint.
 
@@ -125,5 +129,7 @@ class Piano:
             response = requests.request(method, url)
             response.raise_for_status()
             return response
-        except Exception as e:
-            raise PianoAPIError(f"Error executing request to {url}: {e}")
+        except requests.RequestException as e:
+            raise PianoResponseError(f"Error executing request to {url}: {e}")
+        except JSONDecodeError as e:
+            raise PianoResponseError(f"Error decoding JSON response from {url}: {e}")
