@@ -2,7 +2,6 @@ import datetime
 import logging
 import os
 from json import JSONDecodeError
-from mimetypes import knownfiles
 from urllib.parse import urlparse
 from httpx import Client, AsyncClient, HTTPError
 import asyncio
@@ -205,9 +204,3 @@ class PianoESP(BaseClient):
         params = {"date_start": start_date.strftime("%Y-%m-%d"), "date_end": end_date.strftime("%Y-%m-%d")}
 
         return self.request(urls, params=params)
-
-if __name__ == "__main__":
-    client = PianoESP(os.getenv("API_KEY"), int(os.getenv("SITE_ID")))
-    ids = [item.get("Id") for item in client.get_all_campaign()]
-    stats = client.get_campaign_stats(ids, start_date=datetime.date(2026, 1, 1), end_date=datetime.date(2026, 1, 31))
-    print(stats)
