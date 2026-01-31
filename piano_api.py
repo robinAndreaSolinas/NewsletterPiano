@@ -3,6 +3,7 @@ import logging
 import os
 from json import JSONDecodeError
 from urllib.parse import urlparse
+from typing import Optional
 from httpx import Client, AsyncClient, HTTPError
 import asyncio
 
@@ -167,13 +168,14 @@ class BaseClient(object):
 
 class PianoESP(BaseClient):
 
-    def __init__(self, api_key: str, site_id: int, **kwargs):
+    def __init__(self, api_key: str, site_id: int, name:Optional[str]=None, **kwargs):
         super().__init__(api_key, **kwargs)
 
         if not site_id or int(site_id) <= 0:
             raise PianoClientError("Site ID cannot be empty")
 
         self.site_id = site_id
+        self.name = name if name else f"PianoESP_{site_id}"
 
     def get_all_campaign(self, /, filter_active: bool = True):
         try:
@@ -204,3 +206,13 @@ class PianoESP(BaseClient):
         params = {"date_start": start_date.strftime("%Y-%m-%d"), "date_end": end_date.strftime("%Y-%m-%d")}
 
         return self.request(urls, params=params)
+
+    def __str__(self):
+        client =f"{self.client.__class__.__module__}.{self.client.__class__.__name__}"
+        logger = f"{self.logger.__class__.__module__}.{self.logger.__class__.__name__}"
+        
+        return f"{self.name}( api_key=•••••, site_id={self.site_id}, client={client}, logger={logger})"
+    
+    def __repr__(self):
+
+        return f"{self.__class__.__name__}[{self.name}] ( {', '.join([f"{key}={value}" for key, value in self.__dict__.items()])} )"
