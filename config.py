@@ -8,6 +8,6 @@ def get_keys(file:str):
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
 
-keys = get_keys('keys.json')
+keys = get_keys('publisher_keys.json')
 
-__all__ = ['get_keys', keys]
+__all__ = ['get_keys', 'keys']

@@ -4,8 +4,8 @@ from urllib.parse import urlparse
 import os
 import unittest
 import httpx
-
 import piano_api as pa
+
 
 class TestBaseClient(unittest.TestCase):
 

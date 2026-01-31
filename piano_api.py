@@ -214,5 +214,6 @@ class PianoESP(BaseClient):
         return f"{self.name}( api_key=•••••, site_id={self.site_id}, client={client}, logger={logger})"
     
     def __repr__(self):
-
         return f"{self.__class__.__name__}[{self.name}] ( {', '.join([f"{key}={value}" for key, value in self.__dict__.items()])} )"
+
+__all__ = ["PianoESP"]

@@ -1,5 +1,4 @@
 import datetime
-import os
 import unittest
 from typing import Iterable
 from unittest.mock import patch, Mock
@@ -7,19 +6,13 @@ import piano_api as pa
 
 class TestPianoESP(unittest.TestCase):
 
+    def setUp(self):
+        self.test_key = "3Y4h8l1pF0I1d6KUIa4m-3dckvHSSwVhqPEPNWU97dwL_yR9XR5lqjVb_9HT-7nY" # random generated
+        self.test_site_id = 123
+
     @property
     def esp(self):
-        return pa.PianoESP(os.getenv('API_KEY'), 557)
-
-    def test_site_id(self):
-        id = os.getenv('SITE_ID')
-        self.assertIsNotNone(id)
-        try:
-            id = int(id)
-            self.assertIsInstance(id, int)
-            self.assertGreater(id, 0)
-        except ValueError as e:
-            self.fail(f'SITE_ID must be an integer {type(id)} passed')
+        return pa.PianoESP(self.test_key, 557)
 
     def test_ESP(self):
         self.assertRaises(pa.PianoClientError, pa.PianoESP, '', 123)
@@ -28,7 +21,7 @@ class TestPianoESP(unittest.TestCase):
         obj = self.esp
         self.assertIsInstance(obj, pa.PianoESP)
         self.assertIsNotNone(obj.client)
-        self.assertEqual(obj.client.params.get('api_key'), os.getenv('API_KEY'))
+        self.assertEqual(obj.client.params.get('api_key'), self.test_key)
 
     @patch('piano_api.BaseClient.request')
     def test_get_all_campaign(self, mock_get):
@@ -59,6 +52,7 @@ class TestPianoESP(unittest.TestCase):
         params = mock_get.call_args[1].get('params', {})
         self.assertIn('date_start', params)
         self.assertIn('date_end', params)
+
     @patch('httpx.AsyncClient.request')
     def test_get_campaign_stat_multiple(self, mock_get):
         piano = self.esp
