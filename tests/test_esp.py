@@ -40,7 +40,7 @@ class TestPianoESP(unittest.TestCase):
         self.assertIsInstance(campaigns, Iterable)
 
     @patch('httpx.Client.request')
-    def test_get_campaign_stat(self, mock_get):
+    def test_get_campaign_stat_single(self, mock_get):
         piano = self.esp
         test_date = datetime.date(2026, 1, 1)
         self.assertRaises(ValueError, piano.get_campaign_stats, '', start_date=test_date, end_date=test_date)
@@ -59,3 +59,18 @@ class TestPianoESP(unittest.TestCase):
         params = mock_get.call_args[1].get('params', {})
         self.assertIn('date_start', params)
         self.assertIn('date_end', params)
+    @patch('httpx.AsyncClient.request')
+    def test_get_campaign_stat_multiple(self, mock_get):
+        piano = self.esp
+        test_date = datetime.date(2026, 1, 1)
+        self.assertRaises(ValueError, piano.get_campaign_stats, '', start_date=test_date, end_date=test_date)
+        self.assertRaises(ValueError, piano.get_campaign_stats, 123, start_date='', end_date=test_date)
+        self.assertRaises(ValueError, piano.get_campaign_stats, 123, start_date=test_date, end_date='')
+
+        responce_mock = Mock()
+        responce_mock.status_code = 200
+        responce_mock.json.return_value = {'success': True}
+        mock_get.return_value = responce_mock
+
+        piano.get_campaign_stats([123, 456, 678], start_date=test_date, end_date=test_date)
+        self.assertEqual(mock_get.call_count, 3)

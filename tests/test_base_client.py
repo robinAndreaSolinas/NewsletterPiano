@@ -45,15 +45,32 @@ class TestBaseClient(unittest.TestCase):
         self.assertIn('/foo', url.path)
         self.assertIn(url.netloc, os.getenv('API_ENDPOINT'))
 
+    def test_prepare_request(self):
+        self.assertRaises(ValueError, self.client._prepare_request, '/', 'get')
+        self.assertRaises(ValueError, self.client._prepare_request, '/foo', 'PUT')
+
+        preparation =self.client._prepare_request('/foo', params={'api_key': 'dp'})
+        self.assertEqual(len(preparation), 3)
+        method, url, kwargs = preparation
+        self.assertEqual(method, 'GET')
+        self.assertIn('/foo', url)
+        self.assertIsNotNone(kwargs)
+
+        self.assertNotIn('api_key', preparation[2].get('params', {}))
+
     @patch('httpx.AsyncClient.request')
     def test_batch(self, mock):
         response = Mock()
         response.status_code = 200
         response.json.return_value = {'success': True}
         mock.return_value = response
-        self.client._batch_request(['/foo', '/bar'])
+
+        self.client._batch_request(['/foo', '/bar'], params={'jonny':True})
         self.assertGreater(mock.call_count, 1)
-        pass
+        for call in mock.call_args_list:
+            self.assertEqual(call[1].get('method'), 'GET')
+            self.assertIn(os.getenv("API_ENDPOINT"), call[1].get('url'))
+
 
     @patch('httpx.Client.request')
     def test_plain_request(self, mock_get):
@@ -71,7 +88,7 @@ class TestBaseClient(unittest.TestCase):
         self.assertIsNotNone(resp_url)
         self.assertIn(os.getenv("API_ENDPOINT"), resp_url)
 
-        # test deleted api_key from params
+        #test deleted api_key from params
         params = mock_get.call_args[1].get('params', {})
         self.assertNotIn('api_key', params)
 
@@ -91,5 +108,3 @@ class TestBaseClient(unittest.TestCase):
         mock_get.return_value = mock_response
 
         self.assertRaises(pa.PianoResponseError, n_letter._plain_request, '/foo')
-
-

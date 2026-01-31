@@ -2,6 +2,7 @@ import datetime
 import logging
 import os
 from json import JSONDecodeError
+from mimetypes import knownfiles
 from urllib.parse import urlparse
 from httpx import Client, AsyncClient, HTTPError
 import asyncio
@@ -10,8 +11,7 @@ http_client_params = {
     "http2": True,
     "follow_redirects": True,
     "headers": {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 (SeoAgent)",
-        "X-Agent": "SeoAgent-images/1.0"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
     }
 }
 logger = logging.getLogger(__name__)
@@ -70,8 +70,9 @@ async def _fetch_url_with_semaphore(url, *, client, semaphore, method='GET', **k
 
 async def _fetch_urls(urls:list[str], **kwargs):
     semaphore = asyncio.Semaphore(75)
-    if "method" in kwargs:
-        method = kwargs.pop("method")
+
+    method = kwargs.pop("method") if "method" in kwargs else "GET"
+
     async with AsyncClient(**kwargs) as client:
 
         tasks = [_fetch_url_with_semaphore(url, client=client, semaphore=semaphore, method=method) for url in urls]
@@ -89,11 +90,6 @@ async def _fetch_urls(urls:list[str], **kwargs):
 
         return responses
 
-def request_batch(urls, **kwargs):
-
-    kwargs.update(http_client_params)
-    return asyncio.run(_fetch_urls(urls, **kwargs))
-
 
 class BaseClient(object):
 
@@ -106,7 +102,8 @@ class BaseClient(object):
 
         self.logger = logger if logger else logging.getLogger(__name__)
 
-        self.client = client if client else Client(**http_client_params, **kwargs)
+        kwargs.update(http_client_params)
+        self.client = client if client else Client(**kwargs)
 
         self.client.params = {"api_key": api_key}
 
@@ -116,22 +113,33 @@ class BaseClient(object):
         # Combine base endpoint with the complete path (including query string)
         return f"{BaseClient.ENDPOINT}/{path_validator(path)}"
 
-    def _plain_request(self, path: str, method: str = "GET", **kwargs):
-
+    def _prepare_request(self,path:str|list[str], method:str = None, **kwargs):
         # Normalize method to uppercase for consistent validation
-        method = method.upper()
+        method = method.upper() if method else "GET"
         if not method in ["GET", "POST"]:
             raise ValueError("Invalid method")
-        if not path:
+
+        if isinstance(path, list):
+            pathilst = path
+            path = []
+            for p in pathilst:
+                path.append(self.get_url(p))
+        elif isinstance(path, str):
+            path = str(path).strip('/') if path else None
+            path = self.get_url(path)
+        else:
             raise ValueError("Invalid url")
 
-        # Compose the full authenticated URL
-        url = self.get_url(path)
         if "api_key" in kwargs.get('params', {}):
             del kwargs['params']["api_key"]
 
+        return method, path, kwargs
+
+    def _plain_request(self, path: str, method: str = "GET", **kwargs):
+        method,path,kwargs = self._prepare_request(path, method, **kwargs)
+
         try:
-            response = self.client.request(method, url, **kwargs)
+            response = self.client.request(method,path,**kwargs)
             response.raise_for_status()
             return response.json()
         except HTTPError as e:
@@ -140,27 +148,22 @@ class BaseClient(object):
             raise PianoResponseError(f"{e}")
 
     def _batch_request(self,paths:list[str], method="GET", **kwargs):
+        method,paths,kwargs = self._prepare_request(paths, method, **kwargs)
 
-        # Normalize method to uppercase for consistent validation
-        method = method.upper()
-        if not method in ["GET", "POST"]:
-            raise ValueError("Invalid method")
-
-        valid_url = []
-        for path in paths:
-            try:
-                valid_url.append(self.get_url(path))
-            except ValueError as e:
-                self.logger.error(f"Invalid URL: {e}")
+        params = {'api_key': self.client.params.get('api_key'), **kwargs.pop('params', {})}
 
         ## CHANGE CLIENT TO ASYNC
         # Update api_key for all requests
-        return request_batch(valid_url, method=method, params={'api_key': self.client.params.get('api_key'), **kwargs.get('params', {})})
+        resposces = asyncio.run(_fetch_urls(paths, method=method, params=params, **kwargs))
+        try:
+            return list(resposce.json() for resposce in resposces)
+        except JSONDecodeError as e:
+            raise PianoResponseError(f"{e}")
 
-    def request(self, path: str|list[str], **kwargs):
+    def request(self, path: str|list[str], method:str="GET", **kwargs):
         if isinstance(path, list):
-            return self._batch_request(path, **kwargs)
-        return self._plain_request(path, **kwargs)
+            return self._batch_request(path, method, **kwargs)
+        return self._plain_request(path, method, **kwargs)
 
 
 class PianoESP(BaseClient):
@@ -182,9 +185,18 @@ class PianoESP(BaseClient):
 
         return [ active for active in campaign.get('lists', []) if active.get('Active') ] if filter_active else campaign.get('lists', [])
 
-    def get_campaign_stats(self,c_id: int, *, start_date: datetime.date, end_date: datetime.date):
-        if not c_id or not isinstance(c_id, int) or c_id <= 0:
-            raise ValueError("Invalid list id")
+    def get_campaign_stats(self,c_id: int|list[int], *, start_date: datetime.date, end_date: datetime.date):
+        BASE_PATH = "/stats/campaigns/full"
+        c_id = c_id if isinstance(c_id, list) else [c_id]
+        urls = []
+
+        for cid in c_id:
+            if not cid or not isinstance(cid, int) or cid <= 0:
+                raise ValueError("Invalid list id")
+            urls.append(f"{BASE_PATH}/{cid}")
+
+        urls = urls[0] if len(urls) == 1 else urls
+
         if not start_date or not isinstance(start_date, datetime.date):
             raise ValueError("Invalid start date")
         if not end_date or not isinstance(end_date, datetime.date):
@@ -192,4 +204,10 @@ class PianoESP(BaseClient):
 
         params = {"date_start": start_date.strftime("%Y-%m-%d"), "date_end": end_date.strftime("%Y-%m-%d")}
 
-        return self.request(f"/stats/campaigns/full/{c_id}", params=params)
+        return self.request(urls, params=params)
+
+if __name__ == "__main__":
+    client = PianoESP(os.getenv("API_KEY"), int(os.getenv("SITE_ID")))
+    ids = [item.get("Id") for item in client.get_all_campaign()]
+    stats = client.get_campaign_stats(ids, start_date=datetime.date(2026, 1, 1), end_date=datetime.date(2026, 1, 31))
+    print(stats)
