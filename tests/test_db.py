@@ -1,6 +1,5 @@
 from contextlib import suppress
 from urllib.parse import urlencode
-
 from db import PyDBCBuilder, SessionSingleton
 import unittest
 
@@ -18,8 +17,9 @@ class TestPyDBCBuilder(unittest.TestCase):
 
     def test_set_username(self):
         self.assertIsInstance(self.builder.set_username('foo'), PyDBCBuilder)
-        self.assertRaises(ValueError, self.builder.set_username, '')
         self.assertEqual('foo', self.builder._username)
+        self.builder.set_username('')
+        self.assertEqual('', self.builder._username)
 
     def test_set_password(self):
         self.assertIsInstance(self.builder.set_password('bar'), PyDBCBuilder)

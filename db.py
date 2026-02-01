@@ -3,16 +3,35 @@ from typing import Optional, Dict
 from urllib.parse import urlunparse, urlencode, quote_plus
 from sqlalchemy import create_engine, Executable, util, text
 from sqlalchemy.orm import Session as BaseSession
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class PyDBCBuilder:
-    _driver:str
+    _driver:str = None
     _username:str = ""
     _password:str = ""
     _host:str = ""
     _port:int = 0
-    _database_name:str
+    _database_name:str = None
     _params:Dict = {}
+
+    @classmethod
+    def from_env(cls, prefix: str = 'DB_'):
+        builder = cls()
+        if database_url := os.getenv(f'{prefix}URL'): # := to set var and check
+            return database_url
+        try:
+            builder.set_driver(os.getenv(f"{prefix}DRIVER", "sqlite"))
+            builder.set_username(os.getenv(f"{prefix}USERNAME", ''))
+            builder.set_password(os.getenv(f"{prefix}PASSWORD"))
+            builder.set_host(os.getenv(f"{prefix}HOST"))
+            builder.set_port(int(os.getenv(f"{prefix}PORT")))
+            builder.set_database_name(os.getenv(f"{prefix}NAME"))
+            return builder
+        except TypeError as e:
+            raise ValueError("Some Envrinonment variable not set, please chech your envar") from e
 
     def set_driver(self, driver:str):
         if not isinstance(driver, str):
@@ -26,8 +45,6 @@ class PyDBCBuilder:
     def set_username(self, username:str):
         if not isinstance(username, str):
             raise TypeError("Username must be a string")
-        if not username:
-            raise ValueError("There is no username, please set first")
 
         self._username = username
         return self
@@ -105,7 +122,6 @@ class PyDBCBuilder:
             netloc = path
             path = ''
 
-
         return urlunparse((self._driver, netloc, path, '', self._build_params(), ''))
 
     def __str__(self):
@@ -124,6 +140,7 @@ class PyDBCBuilder:
             f"port={self._port}, "
             f"database={self._database_name!r})"
         )
+
 
 class SessionSingleton(BaseSession):
     _instance = None
@@ -191,25 +208,18 @@ class SessionSingleton(BaseSession):
             raise RuntimeError("There is no session instance, please create one first")
         return SessionSingleton._instance
 
-    def __del__(self):
-        SessionSingleton._instance = None
 
-
-def build_from_env():
-    builder = PyDBCBuilder()
-    if os.environ.get("DATABASE_URL"):
-        return os.getenv('DATABESE_URL')
+def get_session(fallback_url=None):
     try:
-        builder.set_driver(os.environ.get("DB_DRIVER", "sqlite"))
-        builder.set_username(os.environ.get("DB_USERNAME"))
-        builder.set_password(os.environ.get("DB_PASSWORD"))
-        builder.set_host(os.environ.get("DB_HOST"))
-        builder.set_port(int(os.environ.get("DB_PORT")))
-        builder.set_database_name(os.environ.get("DB_NAME"))
-        return builder.build()
-    except (ValueError, KeyError, TypeError):
-        return 'sqlite:///:memory:'
+        return SessionSingleton.get_instance()
+    except RuntimeError:
+        try:
+            return SessionSingleton(PyDBCBuilder.from_env().build())
+        except Exception as e:
+            logger.warning(f"Fallback to sqlite on memory because:\nError: {e}\n"
+                           f"==========\nTo fix that warning you can set environment variables")
+            return SessionSingleton(fallback_url if fallback_url else 'sqlite:///:memory:')
 
-session = SessionSingleton(build_from_env())
-
-__all__ = ["SessionSingleton", "PyDBCBuilder"]
+__all__ = ["SessionSingleton",
+           "PyDBCBuilder"
+          ]
