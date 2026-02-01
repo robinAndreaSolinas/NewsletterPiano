@@ -1,15 +1,16 @@
 FROM python:3.12-alpine
 
-WORKDIR app/
+WORKDIR /app
 
 COPY requirements.txt .
 
 COPY . .
 
 RUN apk update && apk upgrade && \
-    pip install -r requirements.txt && \
-    chown -R 1000:1000 /app \
-    chmod +x /app/manage
+    pip install --no-cache-dir -r requirements.txt && \
+    chown -R 1000:1000 /app && \
+    chmod +x /app/manage && \
+    apk cache clean
 
 USER 1000:1000
 
