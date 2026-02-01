@@ -1,5 +1,9 @@
-from typing import Dict
+import os
+from typing import Optional, Dict
 from urllib.parse import urlunparse, urlencode, quote_plus
+from sqlalchemy import create_engine, Executable, util, text
+from sqlalchemy.orm import Session as BaseSession
+
 
 class PyDBCBuilder:
     _driver:str
@@ -121,3 +125,91 @@ class PyDBCBuilder:
             f"database={self._database_name!r})"
         )
 
+class SessionSingleton(BaseSession):
+    _instance = None
+
+    def __new__(cls, *args, **kwargs):
+        if SessionSingleton._instance is None:
+            return super().__new__(cls)
+        return cls._instance
+
+    def __init__(self, connection_url:str,
+                 autoflush: bool = True,
+                 expire_on_commit: bool = True,
+                 autobegin: bool = True,
+                 twophase: bool = False,
+                 binds: Optional[Dict] = None,
+                 enable_baked_queries: bool = True,
+                 info: Optional = None,
+                 query_cls: Optional = None,
+                 join_transaction_mode = "conditional_savepoint",
+                 close_resets_only=0
+                 ):
+
+        if not connection_url:
+            raise TypeError("connection_url is required")
+
+        if SessionSingleton._instance is not None:
+            return
+
+        super().__init__(bind=create_engine(connection_url),
+                         autoflush = autoflush,
+                         expire_on_commit = expire_on_commit,
+                         autobegin = autobegin,
+                         twophase = twophase,
+                         binds = binds,
+                         enable_baked_queries = enable_baked_queries,
+                         info = info,
+                         query_cls = query_cls,
+                         join_transaction_mode = join_transaction_mode,
+                         close_resets_only = close_resets_only,
+                         )
+        self.engine = self.bind
+        SessionSingleton._instance = self
+
+    def execute(self, statement: str | Executable,
+                params: Optional = None,
+                *,
+                execution_options = util.EMPTY_DICT,
+                bind_arguments: Optional = None,
+                _parent_execute_state: Optional = None,
+                _add_event: Optional = None):
+
+        if isinstance(statement, str):
+            statement = text(statement)
+
+        return super().execute(statement, params, execution_options=execution_options, bind_arguments=bind_arguments,
+                               _parent_execute_state=_parent_execute_state, _add_event=_add_event)
+
+    def close(self) -> None:
+        super().close()
+        SessionSingleton._instance = None
+
+    @staticmethod
+    def get_instance():
+        if SessionSingleton._instance is None:
+            raise RuntimeError("There is no session instance, please create one first")
+        return SessionSingleton._instance
+
+    def __del__(self):
+        SessionSingleton._instance = None
+
+
+def build_from_env():
+    builder = PyDBCBuilder()
+    if os.environ.get("DATABASE_URL"):
+        return os.getenv('DATABESE_URL')
+    try:
+        builder.set_driver(os.environ.get("DB_DRIVER", "sqlite"))
+        builder.set_username(os.environ.get("DB_USERNAME"))
+        builder.set_password(os.environ.get("DB_PASSWORD"))
+        builder.set_host(os.environ.get("DB_HOST"))
+        builder.set_port(int(os.environ.get("DB_PORT")))
+        builder.set_database_name(os.environ.get("DB_NAME"))
+        return builder.build()
+    except (ValueError, KeyError, TypeError):
+        return 'sqlite:///:memory:'
+
+session = SessionSingleton(build_from_env())
+
+__all__ = ["SessionSingleton", "PyDBCBuilder"]
