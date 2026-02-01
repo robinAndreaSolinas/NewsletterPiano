@@ -32,6 +32,14 @@ class TestPianoESP(unittest.TestCase):
 
         self.assertIsInstance(campaigns, Iterable)
 
+    @patch('piano_api.BaseClient.request')
+    def test_get_campaign(self, mock_get):
+        piano = self.esp
+        self.assertRaises(ValueError, piano.get_campaign, '')
+        self.assertRaises(ValueError, piano.get_campaign, 'vios')
+        self.assertRaises(ValueError, piano.get_campaign, -1)
+        self.assertRaises(ValueError, piano.get_campaign, 0)
+
     @patch('httpx.Client.request')
     def test_get_campaign_stat_single(self, mock_get):
         piano = self.esp

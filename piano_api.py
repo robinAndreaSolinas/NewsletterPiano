@@ -1,6 +1,7 @@
 import datetime
 import logging
 import os
+from http.client import responses
 from json import JSONDecodeError
 from urllib.parse import urlparse
 from typing import Optional
@@ -178,23 +179,31 @@ class PianoESP(BaseClient):
         self.name = name if name else f"PianoESP_{site_id}"
 
     def get_all_campaign(self, /, filter_active: bool = True):
+        PATH = '/publisher/list'
         try:
-            campaign = self.request(f"/publisher/list/{self.site_id}")
+            campaign = self.request(f"{PATH}/{self.site_id}")
         except PianoResponseError as e:
             self.logger.exception(f"Error to get campaings: {e}")
             return []
 
         return [ active for active in campaign.get('lists', []) if active.get('Active') ] if filter_active else campaign.get('lists', [])
 
+    def get_campaign(self, cid:int):
+        PATH = f"/publisher/pub/{self.site_id}/ml"
+        if not isinstance(cid, int) or not cid or cid <= 0:
+            raise ValueError("Invalid capaing id")
+
+        return self.request(f"{PATH}/{cid}/sq")
+
     def get_campaign_stats(self,c_id: int|list[int], *, start_date: datetime.date, end_date: datetime.date):
-        BASE_PATH = "/stats/campaigns/full"
+        PATH = "/stats/campaigns/full"
         c_id = c_id if isinstance(c_id, list) else [c_id]
         urls = []
 
         for cid in c_id:
             if not cid or not isinstance(cid, int) or cid <= 0:
                 raise ValueError("Invalid list id")
-            urls.append(f"{BASE_PATH}/{cid}")
+            urls.append(f"{PATH}/{cid}")
 
         urls = urls[0] if len(urls) == 1 else urls
 
@@ -206,6 +215,33 @@ class PianoESP(BaseClient):
         params = {"date_start": start_date.strftime("%Y-%m-%d"), "date_end": end_date.strftime("%Y-%m-%d")}
 
         return self.request(urls, params=params)
+
+    def get_ml_user_stats(self, c_id: int|list[int], *, start_date: datetime.date, end_date: datetime.date):
+        PATH = "/stats/squads/full"
+        c_id = c_id if isinstance(c_id, list) else [c_id]
+        urls = []
+
+        for cid in c_id:
+            if not cid or not isinstance(cid, int) or cid <= 0:
+                raise ValueError("Invalid list id")
+            urls.append(f"{PATH}/{cid}")
+
+        urls = urls[0] if len(urls) == 1 else urls
+
+        if not start_date or not isinstance(start_date, datetime.date):
+            raise ValueError("Invalid start date")
+        if not end_date or not isinstance(end_date, datetime.date):
+            raise ValueError("Invalid end date")
+
+        params = {"date_start": start_date.strftime("%Y-%m-%d"), "date_end": end_date.strftime("%Y-%m-%d")}
+
+        return self.request(urls, params=params)
+
+    def get_snapshot_user(self, c_id: int|list[int]):
+        PATH = f"/publisher/pub/{self.site_id}/sq/subscribers"
+        c_id = c_id if isinstance(c_id, list) else [c_id]
+
+        return self._plain_request(f"{PATH}","POST", data={"sqIds": c_id} )
 
     def __str__(self):
         client =f"{self.client.__class__.__module__}.{self.client.__class__.__name__}"
