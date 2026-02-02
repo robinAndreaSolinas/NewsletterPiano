@@ -6,6 +6,7 @@ Python project to retrieve **newsletter analytics** from **Piano** via **API** (
 
 - Queries Piano APIs for newsletter-related data and metrics.
 - Configuration via environment variables and a JSON file (`api_key`, `site_id`, optional `name` per publisher).
+- Uses `piano_api.PianoESP` to list campaigns and fetch campaign stats (e.g. `/publisher/list/{site_id}`, `/stats/campaigns/full/{id}`).
 - Unit tests validate configuration, request building, and API client behaviour.
 
 ## Requirements
@@ -38,9 +39,9 @@ Required:
 
 Optional, for multiple publishers (suffix with `_1`, `_2`, … or leave as default):
 
-- **`PIANO_API_KEY*`** — API key.
-- **`PIANO_SITE_ID*`** — Site ID (integer).
-- **`PIANO_NAME*`** — Display name (optional).
+- **`PIANO_API_KEY_*`** — API key.
+- **`PIANO_SITE_ID_*`** — Site ID (integer).
+- **`PIANO_NAME_*`** — Display name (optional).
 
 Example:
 
@@ -110,6 +111,7 @@ Or use the helper:
 ```bash
 python3 manage init
 python3 manage add keys --from-env   # if using PIANO_* env vars
+python3 manage run
 ```
 
 ## Containerization
@@ -122,7 +124,7 @@ The image runs `python3 manage run` by default (see `Dockerfile`).
 docker build -t newsletter-piano .
 docker run --rm \
   -e API_ENDPOINT="https://api-esp.piano.io" \
-  -v "./publisher_keys.json:/app/publisher_keys.json" \
+  -v "$(pwd)/publisher_keys.json:/app/publisher_keys.json" \
   newsletter-piano
 ```
 
@@ -155,10 +157,9 @@ docker compose up -d
 
 - [ ] Persist newsletter/campaign data (e.g. DB or exports).
 - [ ] Schedule runs (cron, scheduler, or CI) for periodic analytics.
-- [ ] Generate and schedule report
 - [ ] Extend `PianoESP` usage in `main.py` (e.g. `get_campaign_stats`, date ranges).
 - [ ] Optional `.env` loading for local development.
 
 ## Reference
 
-- [Piano ESP API](https://docs.piano.io/track/esp/#MLstatistics) — Piano product and ESP.
+- [Piano ESM API](https://docs.piano.io/track/esp/#MLstatistics) — Piano product and ESP.
