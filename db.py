@@ -198,6 +198,26 @@ class SessionSingleton(BaseSession):
         return super().execute(statement, params, execution_options=execution_options, bind_arguments=bind_arguments,
                                _parent_execute_state=_parent_execute_state, _add_event=_add_event)
 
+    def test_connection(self, timeout: int = 5) -> bool:
+        """
+        Testa la connessione al database
+
+        Args:
+            timeout: Timeout in secondi per il test (default: 5)
+
+        Returns:
+            bool: True se la connessione è attiva, False altrimenti
+        """
+        try:
+            # Esegue una query semplice per testare la connessione
+            with self.engine.connect() as connection:
+                connection.execute(text("SELECT 1"))
+            logger.info("Database connection test: SUCCESS")
+            return True
+        except Exception as e:
+            logger.error(f"Database connection test FAILED: {e}")
+            return False
+
     def close(self) -> None:
         super().close()
         SessionSingleton._instance = None
@@ -216,10 +236,13 @@ def get_session(fallback_url=None):
         try:
             return SessionSingleton(PyDBCBuilder.from_env().build())
         except Exception as e:
-            logger.warning(f"Fallback to sqlite on memory because:\nError: {e}\n"
+            fallback_url = fallback_url if fallback_url else 'sqlite:///:memory:'
+            logger.warning(f"Fallback to sqlite on {fallback_url} because:\nError: {e}\n"
                            f"==========\nTo fix that warning you can set environment variables")
-            return SessionSingleton(fallback_url if fallback_url else 'sqlite:///:memory:')
+            return SessionSingleton(fallback_url)
 
-__all__ = ["SessionSingleton",
-           "PyDBCBuilder"
-          ]
+
+__all__ = [
+    "SessionSingleton",
+    "PyDBCBuilder"
+    ]
