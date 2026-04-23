@@ -68,7 +68,7 @@ class ClientESP(AbstractAPIClient):
     def __str__(self):
             return f"<{self.__class__.__name__}(ID={self.site_id!r})>"
 
-
+# to prevent multiple creation for the same instance
 class RegistryMeta(abc.ABCMeta):
     """
     Metaclasse che mantiene un registro interno di tutte le istanze create.
