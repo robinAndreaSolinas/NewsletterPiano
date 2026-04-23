@@ -1,35 +1,37 @@
 from __future__ import annotations
-import abc
 import datetime
-from typing import Any
-
 from httpx import Client, HTTPStatusError
-from lib.utility import camel_to_snake
+import logging
+from lib.utility import camel_to_snake, Singleton, AbstractAPIClient
 
 
 class APIException(Exception):
     pass
 
+
 class APIClientException(APIException):
     pass
+
 
 class PianoESPException(APIException):
     pass
 
 
-class AbstractAPIClient(abc.ABC):
+class ESPAPIClient(AbstractAPIClient):
 
     ENDPOINT = "https://api-esp.piano.io"
 
-    def __init__(self, site_id: int, api_key: str, *, http_client=None):
+    def __init__(self, site_id: int, api_key: str, *, http_client=None, logger: logging.Logger = None):
         self.site_id = site_id
         self._api_key = api_key
         self._http_client = http_client or Client(base_url=AbstractAPIClient.ENDPOINT, params={"api_key": self._api_key})
+        self._logger = logger or logging.getLogger(__class__.__name__)
 
     def call_api(self,path, method="GET", **kwargs):
 
         if method.upper() not in ("GET", "POST", "PUT", "DELETE"):
-            raise ValueError("Invalid method")
+            raise ValueError(f"Invalid HTTP method: '{method}'. Allowed methods are: GET, POST, PUT, DELETE")
+
         try:
             response = self._http_client.request(method.upper(), f"{path}", **kwargs)
             response.raise_for_status()
@@ -41,7 +43,7 @@ class AbstractAPIClient(abc.ABC):
         return f"<{self.__class__.__name__}({' '.join(f'{k}={v!r}' for k, v in self.__dict__.items() if not k.startswith("_"))})>"
 
 
-class ClientESP(AbstractAPIClient):
+class ClientESP(Singleton, ESPAPIClient):
 
     def get_all_campaigns(self, only_active: bool = True, /):
         res = self.call_api(f"/publisher/list/{self.site_id}").get("lists", [])
@@ -68,59 +70,8 @@ class ClientESP(AbstractAPIClient):
     def __str__(self):
             return f"<{self.__class__.__name__}(ID={self.site_id!r})>"
 
-# to prevent multiple creation for the same instance
-class RegistryMeta(abc.ABCMeta):
-    """
-    Metaclasse che mantiene un registro interno di tutte le istanze create.
-    Supporta ricerca per ID e la sintassi `if Classe in [lista_id]`.
-    """
 
-    def __init__(cls, name: str, bases: tuple, attrs: dict) -> None:
-        super().__init__(name, bases, attrs)
-        cls._instances: dict[int, Any] = {}  # registro privato per classe
-        cls._last_id: int | None = None  # supporto a `if C in [...]`
-
-    def __call__(cls, *args: Any, **kwargs: Any) -> Any:
-        instance = super().__call__(*args, **kwargs)
-        if hasattr(instance, "id"):
-            cls._instances[instance.id] = instance
-            cls._last_id = instance.id
-        return instance
-
-    def find(cls, target_id: int) -> Any:
-        """Cerca un'istanza per ID. Solleva ValueError se non trovata."""
-        if target_id not in cls._instances:
-            raise ValueError(
-                f"Errore: {cls.__name__} con ID {target_id} non trovato nel registro."
-            )
-        return cls._instances[target_id]
-
-    def all(cls) -> list[Any]:
-        """Restituisce tutte le istanze registrate."""
-        return list(cls._instances.values())
-
-    def __eq__(cls, other: Any) -> bool:
-        """
-        Permette `if C in [1, 2, 3]`: Python itera la lista e valuta
-        `elemento == C`; int.__eq__(C) ritorna NotImplemented, quindi Python
-        prova il riflesso `C.__eq__(elemento)` che arriva qui.
-        """
-        if isinstance(other, int):
-            return cls._last_id == other
-        return super().__eq__(other)
-
-    def __hash__(cls) -> int:
-        return super().__hash__()
-
-    def __repr__(cls) -> str:
-        ids = list(cls._instances.keys())
-        return (
-            f"<class '{cls.__name__}' | "
-            f"istanze={ids} | ultimo_id={cls._last_id}>"
-        )
-
-
-class Campaign(AbstractAPIClient, metaclass=RegistryMeta):
+class Campaign(Singleton, ESPAPIClient):
 
     def __init__(self,
                  id: int,
@@ -180,7 +131,7 @@ class Campaign(AbstractAPIClient, metaclass=RegistryMeta):
         return f"<{self.__class__.__name__}(ID={self.id!r})>"
 
 
-class MailingList(AbstractAPIClient, metaclass=RegistryMeta):
+class MailingList(Singleton, ESPAPIClient):
 
     def __init__(self,
                  id: int,
@@ -241,3 +192,6 @@ class MailingList(AbstractAPIClient, metaclass=RegistryMeta):
 
     def __str__(self):
         return f"<{self.__class__.__name__}(ID={self.id!r})>"
+
+
+__all__ = ["ClientESP", "Campaign", "MailingList"]
