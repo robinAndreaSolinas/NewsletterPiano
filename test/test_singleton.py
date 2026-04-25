@@ -1,7 +1,7 @@
 __author__ = 'Claude'
 
 import pytest
-from lib.utility import Singleton
+from lib.utils import Singleton
 
 
 class Animal(Singleton):

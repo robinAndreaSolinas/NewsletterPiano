@@ -1,8 +1,10 @@
 from __future__ import annotations
 import datetime
+from typing import Dict, Any
+
 from httpx import Client, HTTPStatusError
 import logging
-from lib.utility import camel_to_snake, Singleton, AbstractAPIClient
+from lib.utils import camel_to_snake, Singleton, AbstractAPIClient
 
 
 class APIException(Exception):
@@ -24,11 +26,10 @@ class ESPAPIClient(AbstractAPIClient):
     def __init__(self, site_id: int, api_key: str, *, http_client=None, logger: logging.Logger = None):
         self.site_id = site_id
         self._api_key = api_key
-        self._http_client = http_client or Client(base_url=AbstractAPIClient.ENDPOINT, params={"api_key": self._api_key})
+        self._http_client = http_client or Client(base_url=self.ENDPOINT, params={"api_key": self._api_key})
         self._logger = logger or logging.getLogger(__class__.__name__)
 
-    def call_api(self,path, method="GET", **kwargs):
-
+    def call_api(self, path: str, method: str = "GET", **kwargs) -> Dict[str, Any]:
         if method.upper() not in ("GET", "POST", "PUT", "DELETE"):
             raise ValueError(f"Invalid HTTP method: '{method}'. Allowed methods are: GET, POST, PUT, DELETE")
 
@@ -99,7 +100,7 @@ class Campaign(Singleton, ESPAPIClient):
     def from_raw_response(cls, response: dict, api_key: str):
         norm = {camel_to_snake(k): v for k, v in response.items()}
         try:
-           return Campaign.find(int(norm.get("id")))
+           return Campaign.get_instance(int(norm.get("id")))
         except ValueError:
             return cls(
                 norm.pop("id"),
@@ -159,7 +160,7 @@ class MailingList(Singleton, ESPAPIClient):
         if self.mailing_lists:
             for id in self.mailing_lists:
                 try:
-                    campaigns.append(Campaign.find(id))
+                    campaigns.append(Campaign.get_instance(id))
                 except ValueError:
                     pass
         return campaigns
@@ -168,7 +169,7 @@ class MailingList(Singleton, ESPAPIClient):
     def from_raw_response(cls, response: dict, api_key: str):
         norm = {camel_to_snake(k): v for k, v in response.items()}
         try:
-           return Campaign.find(int(norm.get("id")))
+           return Campaign.get_instance(int(norm.get("id")))
         except ValueError:
             return cls(
                 id=norm.pop("id"),
@@ -181,14 +182,14 @@ class MailingList(Singleton, ESPAPIClient):
                 api_key=api_key,
             )
 
-    def get_subscribers(self, date_start: datetime.date = None, date_end: datetime.date = None):
+    def get_stats(self, date_start: datetime.date, date_end: datetime.date = None):
         date_end = date_end or datetime.date.today()
         if not date_start:
             raise ValueError("date_start is required use ClientESP(...).get_all_subscribers() to get all subscribers for lists")
         return self.call_api(f"/stats/squads/full/{self.id}", params={"date_start": date_start, "date_end": date_end})
 
     def __repr__(self):
-        return f"<{self.__class__.__name__}({' '.join(f'{k}={v!r}' for k, v in self.__dict__.items() if not k.startswith("_"))} mailing_lists={[str(m) if isinstance(m, Campaign) else m for m in self.mailing_lists]})>"
+        return f"<{self.__class__.__name__}({' '.join(f'{k}={v!r}' for k, v in self.__dict__.items() if not k.startswith("_"))})>"
 
     def __str__(self):
         return f"<{self.__class__.__name__}(ID={self.id!r})>"

@@ -92,6 +92,8 @@ class Singleton:
 
 
 class AbstractAPIClient(abc.ABC):
+    ENDPOINT:str
+
     @abc.abstractmethod
-    def call_api(self, endpoint: str, method: str = "GET", **kwargs) -> Dict[str, Any]:
+    def call_api(self, path: str, method: str = "GET", **kwargs) -> Dict[str, Any]:
         pass
