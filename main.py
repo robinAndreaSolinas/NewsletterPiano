@@ -1,7 +1,7 @@
 import logging
 from pathlib import Path
 import json
-from lib.PianoESP import ClientESP
+from lib.pianoESP import ClientESP
 
 logging.basicConfig(level=logging.WARNING,
                     format='%(asctime)s %(levelname)s:%(name)s - %(message)s')
