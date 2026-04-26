@@ -1,23 +1,13 @@
 from __future__ import annotations
 import datetime
 from typing import Dict, Any
-
 from httpx import Client, HTTPStatusError
 import logging
-from lib.utils import camel_to_snake, Singleton, AbstractAPIClient
-
-
-class APIException(Exception):
-    pass
-
-
-class APIClientException(APIException):
-    pass
+from lib.utils import camel_to_snake, Singleton, AbstractAPIClient, APIException
 
 
 class PianoESPException(APIException):
     pass
-
 
 class ESPAPIClient(AbstractAPIClient):
 
@@ -27,18 +17,22 @@ class ESPAPIClient(AbstractAPIClient):
         self.site_id = site_id
         self._api_key = api_key
         self._http_client = http_client or Client(base_url=self.ENDPOINT, params={"api_key": self._api_key})
-        self._logger = logger or logging.getLogger(__class__.__name__)
+        self._logger = logger or logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
     def call_api(self, path: str, method: str = "GET", **kwargs) -> Dict[str, Any]:
+        logger = self._logger.parent.getChild(f"{__name__}.{__class__.__name__}")
+
         if method.upper() not in ("GET", "POST", "PUT", "DELETE"):
-            raise ValueError(f"Invalid HTTP method: '{method}'. Allowed methods are: GET, POST, PUT, DELETE")
+            logger.error(f"Invalid HTTP method: {method!r}")
+            raise ValueError(f"Invalid HTTP method: {method!r}")
 
         try:
             response = self._http_client.request(method.upper(), f"{path}", **kwargs)
+            logger.info(f"API call: {method.upper()} {path} -> {response.status_code}")
             response.raise_for_status()
             return response.json()
         except HTTPStatusError as e:
-            raise APIClientException(e)
+            raise PianoESPException(e)
 
     def __repr__(self):
         return f"<{self.__class__.__name__}({' '.join(f'{k}={v!r}' for k, v in self.__dict__.items() if not k.startswith("_"))})>"
@@ -46,7 +40,10 @@ class ESPAPIClient(AbstractAPIClient):
 
 class ClientESP(Singleton, ESPAPIClient):
 
-    def get_all_campaigns(self, only_active: bool = True, /):
+    def __init__(self, site_id: int, api_key: str, *, http_client=None, logger: logging.Logger = None):
+        super().__init__(site_id, api_key, http_client=http_client, logger=logger)
+
+    def get_all_campaigns(self, only_active: bool = True, /) -> list[Campaign]:
         res = self.call_api(f"/publisher/list/{self.site_id}").get("lists", [])
         return [
             Campaign.from_raw_response(raw, api_key=self._api_key)
@@ -54,17 +51,17 @@ class ClientESP(Singleton, ESPAPIClient):
             if raw.get("Active") or not only_active
         ]
 
-    def get_all_mailing_lists(self, only_active: bool = True, /):
+    def get_all_mailing_lists(self, only_active: bool = True, /) -> list[MailingList]:
         res = self.call_api(f"/publisher/pub/{self.site_id}/sq")
 
         return [
             MailingList.from_raw_response(raw, api_key=self._api_key)
-            for raw in res
+            for raw in res.values()
             if raw.get("Active") or not only_active
         ]
 
-    def get_all_subscribers(self, ml: MailingList | list[MailingList]):
-        sq_ids = [ml.list_id] if isinstance(ml, MailingList) else [_.list_id for _ in ml]
+    def get_all_subscribers(self, ml: MailingList | list[MailingList] | int) -> Dict[str, Any]:
+        sq_ids = [ml.id] if isinstance(ml, MailingList) else [_.id for _ in ml] if isinstance(ml, list) else [ml]
         return self.call_api(f"/publisher/pub/{self.site_id}/sq/subscribers", method="POST", json={"sqIds": sq_ids})
 
 
@@ -91,7 +88,7 @@ class Campaign(Singleton, ESPAPIClient):
         self.active = bool(active)
         self.friendly_name = friendly_name.strip() if friendly_name else None
         self.schedule_type = schedule_type.strip() if schedule_type else None
-        self.types = type
+        self.type = type
         self.stage = stage
 
         super().__init__(site_id, api_key)
@@ -110,7 +107,7 @@ class Campaign(Singleton, ESPAPIClient):
                 schedule_type=norm.pop("schedule_type"),
                 site_id=norm.pop("publisher_id"),
                 api_key=api_key,
-                types=norm.pop("type"),
+                type=norm.pop("type"),
                 stage=norm.pop("stage")
             )
 
@@ -119,12 +116,13 @@ class Campaign(Singleton, ESPAPIClient):
 
         return [
             MailingList.from_raw_response(m, api_key=self._api_key)
-            for m in res
+            for m in res.values()
         ]
 
     def get_stats(self, date_start: datetime.date, date_end: datetime.date = None):
         if not date_end:
             date_end = datetime.date.today()
+            self._logger.info(f"No date_end provided, using today's date({date_end}) as fallback")
 
         return self.call_api(f"/stats/campaigns/full/{self.id}", params={"date_start": date_start, "date_end": date_end})
 

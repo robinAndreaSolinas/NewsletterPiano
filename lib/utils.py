@@ -3,17 +3,29 @@ import re
 from typing import Dict, Any
 
 
-def camel_to_snake(string: str) -> str:
-    return re.sub(r'(?<![_])(?<!^)(?=[A-Z])(?!_)', '_', string).lower()
+class APIException(Exception):
+    pass
+
+
+class APIClientException(APIException):
+    pass
+
+
+class AbstractAPIClient(abc.ABC):
+    ENDPOINT:str
+
+    @abc.abstractmethod
+    def call_api(self, path: str, method: str = "GET", **kwargs) -> Dict[str, Any]:
+        pass
 
 
 class Singleton:
     """
     Implementation of the Singleton Design Pattern.
-    
+
     This base class ensures that only one instance exists per unique key.
     Subclasses can override `_get_instance_key()` to customize the key generation logic.
-    
+
     Features:
     - Multiple instances per class, keyed by `_get_instance_key()` result
     - Instance isolation between different subclasses
@@ -26,7 +38,7 @@ class Singleton:
     def __init_subclass__(cls, **kwargs):
         """
         Hook called when a subclass is created.
-        
+
         Ensures each subclass has its own isolated `_instances` dictionary
         and wraps the subclass's __init__ to prevent re-initialization.
         """
@@ -49,7 +61,7 @@ class Singleton:
     def __new__(cls, *args, **kwargs):
         """
         Control instance creation.
-        
+
         Returns an existing instance if one already exists for the given key,
         otherwise creates a new instance and stores it in the registry.
         """
@@ -62,10 +74,10 @@ class Singleton:
     def _get_instance_key(cls, *args, **kwargs):
         """
         Generate the key used to identify unique instances.
-        
+
         Default implementation uses the first positional argument as the key.
         Subclasses should override this to customize key generation logic.
-        
+
         Returns:
             The key identifying this instance, or None if no arguments provided.
         """
@@ -75,13 +87,13 @@ class Singleton:
     def get_instance(cls, key):
         """
         Retrieve an existing instance by its key.
-        
+
         Args:
             key: The key identifying the desired instance.
-            
+
         Returns:
             The instance associated with the given key.
-            
+
         Raises:
             ValueError: If no instance exists for the given key.
         """
@@ -91,9 +103,5 @@ class Singleton:
         return instance
 
 
-class AbstractAPIClient(abc.ABC):
-    ENDPOINT:str
-
-    @abc.abstractmethod
-    def call_api(self, path: str, method: str = "GET", **kwargs) -> Dict[str, Any]:
-        pass
+def camel_to_snake(string: str) -> str:
+    return re.sub(r'(?<![_])(?<!^)(?=[A-Z])(?!_)', '_', string).lower()
