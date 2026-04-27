@@ -6,8 +6,9 @@ package_logger.setLevel(logging.DEBUG)
 
 __author__ = 'Andrea Solinas'
 __version__ = '0.1.0'
+
 __all__ = [
-    "PianoESP",
+    "pianoESP",
     "APIException",
     "APIClientException",
     "AbstractAPIClient",

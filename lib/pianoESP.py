@@ -1,6 +1,6 @@
 from __future__ import annotations
 import datetime
-from typing import Dict, Any
+from typing import Dict, Any, List
 from httpx import Client, HTTPStatusError
 import logging
 from lib.utils import camel_to_snake, Singleton, AbstractAPIClient, APIException
@@ -38,7 +38,7 @@ class ESPAPIClient(AbstractAPIClient):
         return f"<{self.__class__.__name__}({' '.join(f'{k}={v!r}' for k, v in self.__dict__.items() if not k.startswith("_"))})>"
 
 
-class ClientESP(Singleton, ESPAPIClient):
+class ClientESP(ESPAPIClient):
 
     def __init__(self, site_id: int, api_key: str, *, http_client=None, logger: logging.Logger = None):
         super().__init__(site_id, api_key, http_client=http_client, logger=logger)
@@ -60,8 +60,8 @@ class ClientESP(Singleton, ESPAPIClient):
             if raw.get("Active") or not only_active
         ]
 
-    def get_all_subscribers(self, ml: MailingList | list[MailingList] | int) -> Dict[str, Any]:
-        sq_ids = [ml.id] if isinstance(ml, MailingList) else [_.id for _ in ml] if isinstance(ml, list) else [ml]
+    def get_all_subscribers(self, ml: MailingList | List[MailingList]) -> Dict[str, Any]:
+        sq_ids = [ml.id] if isinstance(ml, MailingList) else [_.id for _ in ml]
         return self.call_api(f"/publisher/pub/{self.site_id}/sq/subscribers", method="POST", json={"sqIds": sq_ids})
 
 
@@ -91,13 +91,13 @@ class Campaign(Singleton, ESPAPIClient):
         self.type = type
         self.stage = stage
 
-        super().__init__(site_id, api_key)
+        ESPAPIClient.__init__(self, site_id, api_key)
 
     @classmethod
     def from_raw_response(cls, response: dict, api_key: str):
         norm = {camel_to_snake(k): v for k, v in response.items()}
         try:
-           return Campaign.get_instance(int(norm.get("id")))
+           return Campaign.get_instance(norm.get("id"))
         except ValueError:
             return cls(
                 norm.pop("id"),
@@ -150,7 +150,7 @@ class MailingList(Singleton, ESPAPIClient):
         self.internal_name = internal_name.strip() if internal_name else None
         self.hide_on_sub_page = bool(hide_on_sub_page)
 
-        super().__init__(site_id, api_key)
+        ESPAPIClient.__init__(self, site_id, api_key)
 
     @property
     def linked_campaigns(self):
@@ -167,7 +167,7 @@ class MailingList(Singleton, ESPAPIClient):
     def from_raw_response(cls, response: dict, api_key: str):
         norm = {camel_to_snake(k): v for k, v in response.items()}
         try:
-           return Campaign.get_instance(int(norm.get("id")))
+           return MailingList.get_instance(norm.get("id"))
         except ValueError:
             return cls(
                 id=norm.pop("id"),

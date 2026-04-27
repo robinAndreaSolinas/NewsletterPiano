@@ -28,5 +28,4 @@ def get_stats(client: ClientESP, date_start: str, date_end: str = None):
 if __name__ == '__main__':
     key = PIANO_API_KEYS[0]
     client = ClientESP(key.get("id"), key.get("api_key"))
-    # print(list(get_stats(client, "2026-04-25")))
-    client.call_api("pippo", "GET", params={"pippo": "pluto"})
+    print(client.get_all_campaigns())
