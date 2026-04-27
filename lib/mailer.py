@@ -20,13 +20,13 @@ class EmailInterface(ABC):
     @property
     @abstractmethod
     def recipients(self) -> list[str]:
-        """Lista completa di tutti i destinatari (to + cc + bcc)."""
+        """Lists of all recipients(to + cc + bcc)."""
         ...
 
     @property
     @abstractmethod
     def message(self) -> str:
-        """Restituisce il messaggio email formattato come stringa."""
+        """returns the message in string format."""
         ...
 
 
@@ -59,6 +59,7 @@ class Email(EmailInterface):
         msg['From'] = self.from_address
         msg['To'] = ', '.join(self.to)
         msg['Cc'] = ', '.join(self.cc)
+        # NB BCC not included in the header
         msg['Subject'] = self.subject
 
         msg.attach(MIMEText(self.body, 'html' if '<' in self.body and '>' in self.body else 'plain', 'UTF-8'))
