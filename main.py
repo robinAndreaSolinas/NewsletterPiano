@@ -2,9 +2,11 @@ import logging
 from pathlib import Path
 import json
 from lib.pianoESP import ClientESP
+import app
 
 logging.basicConfig(level=logging.WARNING,
                     format='%(asctime)s %(levelname)s:%(name)s - %(message)s')
+
 
 def get_api_key(path):
     with open(Path(__file__).parent / "data" / path, "r") as f:
@@ -24,8 +26,5 @@ def get_stats(client: ClientESP, date_start: str, date_end: str = None):
 
     return fields
 
-
 if __name__ == '__main__':
-    key = PIANO_API_KEYS[0]
-    client = ClientESP(key.get("id"), key.get("api_key"))
-    print(client.get_all_campaigns())
+    app.start(debug=True)
