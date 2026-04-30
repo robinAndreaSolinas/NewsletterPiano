@@ -1,17 +1,15 @@
-import logging
-from .utils import *
+"""
+Core internal library package for this Django project.
 
-package_logger = logging.getLogger(__name__)
-package_logger.setLevel(logging.DEBUG)
+This directory is strictly reserved for internal, cross-app modules that
+modify or extend the core behavior of the project. This includes, but
+is not limited to:
+  - Custom database routers
+  - Shared utilities and helper functions
+  - Custom management commands
+  - Project-specific middleware or core configurations
 
-__author__ = 'Andrea Solinas'
-__version__ = '0.1.0'
-
-__all__ = [
-    "pianoESP",
-    "APIException",
-    "APIClientException",
-    "AbstractAPIClient",
-    "Singleton",
-    "camel_to_snake"
-]
+IMPORTANT: Do NOT place external dependencies here.
+All external libraries, third-party SDKs, and API clients must be
+installed or located in `/var/lib`.
+"""

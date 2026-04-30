@@ -3,7 +3,7 @@ import datetime
 from typing import Dict, Any, List
 from httpx import Client, HTTPStatusError
 import logging
-from lib.utils import camel_to_snake, Singleton, AbstractAPIClient, APIException
+from .utils import camel_to_snake, Singleton, AbstractAPIClient, APIException
 
 
 class PianoESPException(APIException):
