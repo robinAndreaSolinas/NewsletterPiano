@@ -29,3 +29,8 @@ htmlcov/
 .mypy_cache/
 
 .env
+
+logs/
+local/
+*.local*
+migrations/[0-9]+

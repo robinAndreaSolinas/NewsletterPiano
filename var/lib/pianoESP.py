@@ -53,10 +53,9 @@ class ClientESP(ESPAPIClient):
 
     def get_all_mailing_lists(self, only_active: bool = True, /) -> list[MailingList]:
         res = self.call_api(f"/publisher/pub/{self.site_id}/sq")
-
         return [
             MailingList.from_raw_response(raw, api_key=self._api_key)
-            for raw in res.values()
+            for raw in res
             if raw.get("Active") or not only_active
         ]
 
