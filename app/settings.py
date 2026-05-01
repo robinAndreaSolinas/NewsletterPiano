@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 import os
 from pathlib import Path
+from lib.utils import register_app
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -33,21 +34,6 @@ ALLOWED_HOSTS = [
     "*" if DEBUG else os.getenv("HOST", "0.0.0.0") # allow all hosts if in debug mode
 ]
 
-def register_app(exclude_apps:list[str]=None):
-    """
-    search for apps in the app directory and register them
-    Don't use moder import app with module as `path.name.apps.{class}`
-
-    :argument exclude_apps: list of apps to exclude
-    :return: list of apps name
-    """
-    project_dir_name = Path(__file__).parent.name
-    exclude_apps = exclude_apps or []
-
-    for path in BASE_DIR.glob("*"):
-        if path.is_dir() and path.name not in (project_dir_name, *exclude_apps) and (path / "apps.py").exists():
-            yield path.name
-
 # Application definition
 
 INSTALLED_APPS = [
@@ -57,7 +43,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    *register_app()
+    *register_app(BASE_DIR)
 ]
 
 MIDDLEWARE = [
