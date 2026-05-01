@@ -17,6 +17,10 @@ from lib.utils import register_app
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 DATA_DIR = BASE_DIR / "var" / "data"
+LOG_DIR = BASE_DIR / "var" / "logs"
+
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
@@ -25,13 +29,20 @@ DATA_DIR = BASE_DIR / "var" / "data"
 SECRET_KEY = 'django-insecure-1Bu~~G5rMYTpm*k1spDF`@C"c#C;%ah]6gJtRCa@Ue;`FFn95MTM?=W;<pvASoYPp&TJy@U:y;'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = (os.getenv("DEBUG", "False") == "True" or
-         os.getenv("DEBUG", "False") == "true" or
+DEBUG = (os.getenv("DEBUG", "False").upper() == "TRUE" or
          os.getenv("DEBUG", "False") == "1")
+
+def hosts():
+    if DEBUG: # allow all hosts if in debug mode
+        return set('*')
+    h = set(os.getenv("ALLOWED_HOSTS", "").split(","))
+    h.add(os.getenv("HOST", "0.0.0.0"))
+    h.discard("")
+    return h
 
 ALLOWED_HOSTS = [
     *["localhost","127.0.0.1","[::1]"], # allow localhost
-    "*" if DEBUG else os.getenv("HOST", "0.0.0.0") # allow all hosts if in debug mode
+    *hosts()
 ]
 
 # Application definition
