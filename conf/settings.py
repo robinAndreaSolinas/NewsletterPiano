@@ -11,7 +11,7 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 import os
 from pathlib import Path
-from lib.utils import register_app
+from lib.utils import register_app, allowed_hosts_env
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -32,17 +32,10 @@ SECRET_KEY = 'django-insecure-1Bu~~G5rMYTpm*k1spDF`@C"c#C;%ah]6gJtRCa@Ue;`FFn95M
 DEBUG = (os.getenv("DEBUG", "False").upper() == "TRUE" or
          os.getenv("DEBUG", "False") == "1")
 
-def hosts():
-    if DEBUG: # allow all hosts if in debug mode
-        return set('*')
-    h = set(os.getenv("ALLOWED_HOSTS", "").split(","))
-    h.add(os.getenv("HOST", "0.0.0.0"))
-    h.discard("")
-    return h
 
 ALLOWED_HOSTS = [
     *["localhost","127.0.0.1","[::1]"], # allow localhost
-    *hosts()
+    *allowed_hosts_env(DEBUG)
 ]
 
 # Application definition
