@@ -19,9 +19,9 @@ COPY . .
 ENV HOST=0.0.0.0
 ENV PORT=8000
 ENV WORKER_THREADS=4
-#ENV DEBUG=true|1
+#ENV DEBUG=true|1|TRUE
 ENV ALLOWED_HOSTS=sito1.com,sito2.com,127.0.0.1
 
 ENTRYPOINT ["/app/entrypoint"]
 
-CMD ["app.wsgi"]
+CMD ["start", "app.wsgi"]

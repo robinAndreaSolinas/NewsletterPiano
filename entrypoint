@@ -1,20 +1,88 @@
 #!/bin/sh
 set -e
 
-# Se hai ENV di default (opzionali)
-HOST=${HOST:-0.0.0.0}
-PORT=${PORT:-8000}
-WORKER_THREADS=${WORKER_THREADS:-4}
-RELOAD=""
+is_shell() {
+    grep -qx "$(command -v "$1" 2>/dev/null)" /etc/shells 2>/dev/null
+}
 
-if [ $DEBUG ]; then
-  RELOAD="--reload"
-fi
+help() {
+  printf "  -h|--help          Show this help message\n"
+  is_verbose "$@" && printf "    [--dev]          Show Dev options\n"
+  printf "    [-v|--verbose]\n"
+  echo
 
-if [ -f "manage.py" ] && [ -x "manage.py" ]; then
-    ./manage.py migrate
-fi
+  if [ "$1" = "--dev" ] || [ "$DEBUG" ]; then
+    printf "  start <wsgi>       Runs migrations and starts gunicorn\n"
+    printf "                     \033[38;5;208m⚠️  Dev/internal use only — do not expose in production\033[0m\n"
+    echo
+  fi
 
+  printf "  <cmd>              Run a manage.py command\n"
+  is_verbose "$@" && printf "    [help]           Show manage.py list commands\n"
+  echo
 
-# Avvia gunicorn passando i parametri
-exec gunicorn --bind "$HOST":"$PORT" --threads "$WORKER_THREADS" $RELOAD "$@"
+  printf "  <shell>            Open an system shell (e.g. sh, bash)\n"
+  is_verbose "$@" && printf "                     Reads '/etc/shells' for valid shell list\n"
+
+}
+
+is_verbose() {
+    for arg in "$@"; do
+        [ "$arg" = "-v" ] || [ "$arg" = "--verbose" ] && return 0
+    done
+    return 1
+}
+
+runServer(){
+    HOST=${HOST:-0.0.0.0}
+    PORT=${PORT:-8000}
+    WORKER_THREADS=${WORKER_THREADS:-4}
+    RELOAD=""
+
+    if [ "$DEBUG" ]; then
+      RELOAD="--reload"
+    fi
+
+    if [ -f "manage.py" ] && [ -x "manage.py" ]; then
+      is_verbose "$@" && printf "Create migration to db\n\n"
+      ./manage.py makemigrations
+      ./manage.py migrate
+    fi
+    is_verbose "$@" && printf "Start gunicorn server...\n\n"
+    exec gunicorn --bind "$HOST":"$PORT" --threads "$WORKER_THREADS" $RELOAD "$@"
+}
+
+main (){
+  case "$1" in
+  start)
+    shift
+    runServer "$@"
+    ;;
+  -h|--help)
+    shift
+    help "$@"
+    ;;
+  *)
+    if is_shell "$1"; then
+      exec "$@"
+    elif [ -f "manage.py" ] && [ -x "manage.py" ]; then
+
+      set +e
+      ./manage.py "$@" 2>/dev/null
+      code=$?
+      set -e
+
+      if [ $code != 0 ]; then
+        printf "manage.py: Unknown command: '%s'\n\n" $@
+        help
+        exit $code
+      fi
+    else
+      help
+      exit 1
+    fi
+    ;;
+esac
+}
+
+main "$@"

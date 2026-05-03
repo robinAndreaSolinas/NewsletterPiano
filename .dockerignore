@@ -4,6 +4,7 @@ tests/
 *ocker*
 *.md
 *.MD
+.git*
 
 .env
 venv/
