@@ -33,4 +33,4 @@ htmlcov/
 logs/
 local/
 *.local*
-migrations/[0-9]+
+*/migrations/[0-9]*

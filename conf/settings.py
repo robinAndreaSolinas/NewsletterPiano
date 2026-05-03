@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 import os
+from datetime import date
 from pathlib import Path
 from lib.utils import register_app, allowed_hosts_env
 
@@ -128,3 +129,44 @@ USE_TZ = True
 STATIC_URL = 'static/'
 
 SECRET_KEYS = DATA_DIR / "secrets.json"
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+
+    "formatters": {
+        "verbose": {
+            "format": "{asctime} {levelname} {name} {message}",
+            "style": "{",
+            "datefmt": "%Y-%m-%d %H:%M:%S",
+        },
+    },
+
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "verbose",
+        },
+        "file": {
+            "class": "logging.handlers.TimedRotatingFileHandler",
+            "filename": LOG_DIR / f"log-{date.today()}.log",
+            "when": "midnight",
+            "backupCount": 30,        # mantieni 30 giorni
+            "formatter": "verbose",
+            "encoding": "utf-8",
+        },
+    },
+
+    "root": {
+        "handlers": ["console", "file"],
+        "level": "INFO",
+    },
+
+    "loggers": {
+        "django": {
+            "handlers": ["console", "file"],
+            "level": "INFO",
+            "propagate": False,
+        },
+    },
+}

@@ -115,7 +115,7 @@ class Campaign(Singleton, ESPAPIClient):
 
         return [
             MailingList.from_raw_response(m, api_key=self._api_key)
-            for m in res.values()
+            for m in res
         ]
 
     def get_stats(self, date_start: datetime.date, date_end: datetime.date = None):
