@@ -24,4 +24,4 @@ ENV ALLOWED_HOSTS=sito1.com,sito2.com,127.0.0.1
 
 ENTRYPOINT ["/app/entrypoint"]
 
-CMD ["start", "app.wsgi"]
+CMD ["start", "--preload", "conf.wsgi"]
