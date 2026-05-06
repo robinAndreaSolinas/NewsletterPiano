@@ -49,7 +49,8 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    *register_app(BASE_DIR)
+    *register_app(BASE_DIR),
+    'django_apscheduler',
 ]
 
 MIDDLEWARE = [
