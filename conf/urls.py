@@ -16,6 +16,24 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path
+from scheduler.apps import SchedulerConfig
+
+"""
+WARNING: The scheduler is intentionally started here in urls.py to prevent:
+         1. Circular import issues when importing scheduler components in other modules
+         2. Database connection errors that occur when the scheduler starts too early
+            in the Django initialization process (e.g., in apps.py ready() method)
+         
+         This placement ensures Django's app registry and database connections are
+         fully initialized before the scheduler attempts to access the database
+         for job persistence via DjangoJobStore.
+
+NOTE: You can change the hash algorithm used for job ID generation before starting
+      the scheduler by calling SchedulerConfig.set_hash_algo('algorithm_name').
+      *This must be done before SchedulerConfig.start_scheduler() is called.*
+         
+"""
+SchedulerConfig.start_scheduler()
 
 urlpatterns = [
     path('__administration/', admin.site.urls)
