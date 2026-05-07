@@ -1,3 +1,5 @@
+import inspect
+
 from django.core.management.base import BaseCommand
 import logging
 from scheduler.job_registry import JobRegistry
@@ -7,8 +9,9 @@ logging.disable(logging.WARNING)
 class Command(BaseCommand):
     help = 'Base command to manage jobs'
 
+
     def add_arguments(self, parser):
-        # parser.add_argument('-v','--verbosity', action='count', default=1, help='Verbosity level')
+
         subparsers = parser.add_subparsers(dest='subcommand')
 
         list_parser = subparsers.add_parser('list', help='Elenca tutti i job registrati')
@@ -21,6 +24,7 @@ class Command(BaseCommand):
         execute.add_argument('job', type=str, help='Hash, nome o pacchetto del job da eseguire', default=None, nargs='?')
         execute.add_argument('--all', action='store_true', help='Esegue tutti i job')
         execute.add_argument('-l', '--line-number', type=int, help='Esegue il job di una riga', )
+        execute.add_argument('args', nargs='*', help='Positional arguments')
 
 
     def list_jobs(self, options, jobs):
@@ -65,7 +69,7 @@ class Command(BaseCommand):
             )
 
 
-    def run_job(self, options, jobs):
+    def run_job(self, options, jobs, *args, **kwargs):
         runner_job = set()
 
         if options['all']:
@@ -88,10 +92,58 @@ class Command(BaseCommand):
             self.stderr.write("No jobs found")
             return
 
-        self.stdout.write(f"Running job")
-        for j in runner_job:
-            self.stdout.write(f"\t<{j.name} {f"{j.id!r}" if options.get('verbosity') != 1 else f"{j.id[:8]!r}"}>")
-            j.function()
+
+        try:
+            self.stdout.write(f"Running job:")
+            for j in runner_job:
+                self.stdout.write(f" - <{j.name} {f"{j.id!r}" if options.get('verbosity') != 1 else f"{j.id[:8]!r}"}> Status: Executed")
+                if (args or kwargs) and len(runner_job) == 1:
+                    # apply args and kwargs to a single job only
+                    params = self._assign_params(j.function, *args, **kwargs)
+                    j.function(**params)
+                    break
+                elif args or kwargs and len(runner_job) > 1:
+                    raise TypeError
+
+                j.function(*j.kwargs.get('args', ()), **j.kwargs.get('kwargs', {}))
+        except TypeError as e:
+            self.stderr.write(
+                "\nFailed to execute job: invalid arguments.\n"
+                "Arguments can only be passed to a single job.\n"
+                "Usage: manage.py job run <name|id> [arg|key=value] ..."
+            )
+    @staticmethod
+    def _assign_params(fn, *args, **kwargs):
+
+        sig = inspect.signature(fn)
+        params = list(sig.parameters.keys())
+
+        trimmed_args = []
+        for i, val in enumerate(args):
+            if i >= len(params) or params[i] in kwargs:
+                break
+            trimmed_args.append(val)
+
+        bound_args = sig.bind_partial(*trimmed_args, **kwargs)
+        bound_args.apply_defaults()
+        return bound_args.arguments
+
+    @staticmethod
+    def split_args(arguments):
+        a = ()
+        kw = {}
+        for arg in arguments:
+            arg = arg.strip()
+            if not arg or arg.startswith("-"):
+                continue
+            if "=" in arg:
+                k, v = arg.split("=", 1)
+                kw[k] = v
+            else:
+                a += (arg,)
+
+        return a, kw
+
 
     def handle(self, *args, **options):
 
@@ -102,6 +154,8 @@ class Command(BaseCommand):
             case 'list':
                 self.list_jobs(options, jobs)
             case 'run':
-                self.run_job(options, jobs)
+                fnargs, fnkwargs = self.split_args(args)
+
+                self.run_job(options, jobs, *fnargs, **fnkwargs)
             case _:
                 self.print_help('manage.py', 'job')
