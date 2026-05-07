@@ -33,10 +33,7 @@ class SchedulerConfig(AppConfig):
         from apscheduler.schedulers.background import BackgroundScheduler
         from django_apscheduler.jobstores import DjangoJobStore
 
-        modules = set(include_module or []) & set(exclude_module or [])
-        modules |= {"views", "jobs"} if include_default else set()
-
-        for mod in modules: autodiscover_modules(mod)
+        cls.load_jobs(include_module, exclude_module, include_default)
 
         if cls._instance is not None:
             if cls._instance.running:
@@ -81,3 +78,14 @@ class SchedulerConfig(AppConfig):
         """
         JobRegistry.set_algo(algo)
         return cls
+
+    @classmethod
+    def load_jobs(cls,
+                  include_module: Iterable[str] = None,
+                    exclude_module: Iterable[str] = None,
+                    include_default=True):
+
+        modules = set(include_module or []) & set(exclude_module or [])
+        modules |= {"views", "jobs"} if include_default else set()
+
+        for mod in modules: autodiscover_modules(mod)
