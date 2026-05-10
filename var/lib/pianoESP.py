@@ -169,8 +169,8 @@ class MailingList(Singleton, ESPAPIClient):
            return MailingList.get_instance(norm.get("id"))
         except ValueError:
             return cls(
-                id=norm.pop("id"),
-                name=norm.pop("name"),
+                norm.pop("id"),
+                norm.pop("name"),
                 active=norm.pop("active"),
                 internal_name=norm.pop("internal_name"),
                 hide_on_sub_page=norm.pop("hide_on_sub_page"),

@@ -81,6 +81,8 @@ class Singleton:
         Returns:
             The key identifying this instance, or None if no arguments provided.
         """
+        # ! WARNING: It’s a very simple implementation, but it should work in most cases.
+        #         I'll improve it later, for creating a stronger key generation.
         return args[0] if args else None
 
     @classmethod
