@@ -6,10 +6,3 @@ from scheduler import job
 
 # Create your views here.
 
-@job('interval', minutes=1)
-def my_job():
-    print('Hello World!')
-
-@job('interval', minutes=1, args=(1,2))
-def my_jxob(a, b):
-    print(a+b)

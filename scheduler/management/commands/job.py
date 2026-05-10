@@ -1,5 +1,6 @@
 import inspect
 
+from conf import settings
 from django.core.management.base import BaseCommand
 import logging
 from scheduler.job_registry import JobRegistry
@@ -8,7 +9,7 @@ logging.disable(logging.WARNING)
 
 class Command(BaseCommand):
     help = 'Base command to manage jobs'
-
+    verbose_name = 'Job Manager'
 
     def add_arguments(self, parser):
 
@@ -96,22 +97,50 @@ class Command(BaseCommand):
         try:
             self.stdout.write(f"Running job:")
             for j in runner_job:
-                self.stdout.write(f" - <{j.name} {f"{j.id!r}" if options.get('verbosity') != 1 else f"{j.id[:8]!r}"}> Status: Executed")
+                self.stdout.write(f" - <{j.name} {f'{j.id!r}' if options.get('verbosity') != 1 else f'{j.id[:8]!r}'}>")
+
                 if (args or kwargs) and len(runner_job) == 1:
-                    # apply args and kwargs to a single job only
+                    # if running only one job, pass args/kwargs to it
                     params = self._assign_params(j.function, *args, **kwargs)
                     j.function(**params)
-                    break
+
                 elif args or kwargs and len(runner_job) > 1:
                     raise TypeError
 
-                j.function(*j.kwargs.get('args', ()), **j.kwargs.get('kwargs', {}))
+                else:
+                    sched_args = j.kwargs.get('args', ())
+                    sched_kwargs = j.kwargs.get('kwargs', {})
+                    sig = inspect.signature(j.function)
+
+                    required = [
+                        p.name for p in sig.parameters.values()
+                        if p.default is inspect.Parameter.empty
+                           and p.kind not in (p.VAR_POSITIONAL, p.VAR_KEYWORD)
+                    ]
+
+                    if sched_args or sched_kwargs:
+                        # if there are scheduled args and kwargs, pass them to the job
+                        j.function(*sched_args, **sched_kwargs)
+
+                    elif not required:
+                        # if there are no required args, run the job with his default values
+                        j.function()
+
+                    else:
+                        raise TypeError(
+                            f"Job '{j.name}' requires arguments: {', '.join(required)}\n"
+                            f"Usage: manage.py job run {j.id[:8]} [arg|key=value] ..."
+                        )
         except TypeError as e:
             self.stderr.write(
                 "\nFailed to execute job: invalid arguments.\n"
                 "Arguments can only be passed to a single job.\n"
                 "Usage: manage.py job run <name|id> [arg|key=value] ..."
             )
+            if settings.DEBUG:
+                logging.exception(e)
+
+
     @staticmethod
     def _assign_params(fn, *args, **kwargs):
 
@@ -127,6 +156,7 @@ class Command(BaseCommand):
         bound_args = sig.bind_partial(*trimmed_args, **kwargs)
         bound_args.apply_defaults()
         return bound_args.arguments
+
 
     @staticmethod
     def split_args(arguments):
