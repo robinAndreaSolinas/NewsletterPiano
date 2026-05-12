@@ -4,7 +4,7 @@ from django.core.management.base import BaseCommand
 from scheduler.job_registry import JobRegistry
 import logging
 
-logging.disable(logging.WARNING)
+logging.disable(logging.CRITICAL if not settings.DEBUG else logging.NOTSET)
 
 class Command(BaseCommand):
     help = 'Base command to manage jobs'
@@ -74,6 +74,10 @@ class Command(BaseCommand):
 
 
     def run_job(self, options, jobs, *args, **kwargs):
+        if not jobs:
+            self.stderr.write("No jobs found")
+            return
+
         runner_job = set()
 
         if options['all']:
