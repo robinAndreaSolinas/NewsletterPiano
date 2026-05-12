@@ -1,9 +1,8 @@
 import inspect
-
 from conf import settings
 from django.core.management.base import BaseCommand
-import logging
 from scheduler.job_registry import JobRegistry
+import logging
 
 logging.disable(logging.WARNING)
 
@@ -32,6 +31,10 @@ class Command(BaseCommand):
         count = 0
         show_line = options.get('line_number')
         verbose = options.get('verbosity') != 1
+
+        if not jobs:
+            self.stderr.write("No jobs found")
+            return
 
         # larghezza hash dinamica
         W = {

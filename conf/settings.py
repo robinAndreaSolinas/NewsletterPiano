@@ -130,7 +130,8 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 
-SECRET_KEYS = DATA_DIR / "secrets.json"
+SECRET_KEYS = (DATA_DIR / "secrets.json")
+SECRET_KEYS.touch(mode=0o600, exist_ok=True)
 
 LOGGING = {
     "version": 1,
