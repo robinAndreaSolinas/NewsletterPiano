@@ -13,7 +13,10 @@ class Campaign(models.Model):
     fetched_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"{self.__class__.__name__}(campaign_id={self.campaign_id}, name={self.name}, active={self.active}, site_id={self.site_id}, schedule_type={self.schedule_type}, mailing_list_id={self.mailing_list_id})"
+        return f"{self.name.title()}"
+
+    def __repr__(self):
+        return f"<{self.__class__.__name__}(campaign_id={self.campaign_id}, name={self.name}, active={self.active}, site_id={self.site_id}, schedule_type={self.schedule_type}, mailing_list_id={self.mailing_list_id})>"
 
 
 class Analytics(models.Model):
@@ -32,6 +35,11 @@ class Analytics(models.Model):
         indexes = [
             models.Index(fields=['campaign', 'date']),
         ]
+        verbose_name = 'Analytics'
+        verbose_name_plural = 'Analytics'
 
     def __str__(self):
-        return f"{self.__class__.__name__}(campaing={self.campaign}, date={self.date}, sent={self.sent}, opened={self.opened}, clicked={self.clicked}, subscribed={self.subscribed}, unsubscribed={self.unsubscribed})"
+        return f"{self.campaign.name.title()} - {self.date}"
+
+    def __repr__(self):
+        return f"<{self.__class__.__name__}(campaing={self.campaign}, date={self.date}, sent={self.sent}, opened={self.opened}, clicked={self.clicked}, subscribed={self.subscribed}, unsubscribed={self.unsubscribed})>"
