@@ -93,9 +93,10 @@ class JobRegistry(Registry):
         Note:
             The ID is deterministic - identical configurations will produce identical IDs.
         """
-        encoded_string = f"{self.name}{self.trigger}{self.kwargs}".encode("utf-8")
-        algo = self.__algo
-        return hashlib.new(algo, encoded_string).hexdigest()
+        jobkwargs =  {k: v for k, v in self.kwargs.items() if k not in ("id", "name", "kwargs", "args")}
+
+        encoded_string = f"{self.name}{self.trigger}{jobkwargs}".encode("utf-8")
+        return hashlib.new(self.__algo, encoded_string).hexdigest()
 
     @property
     def name(self) -> str:
