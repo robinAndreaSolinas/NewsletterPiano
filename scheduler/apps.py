@@ -53,6 +53,7 @@ class SchedulerConfig(AppConfig):
                         job.trigger,
                         id=job.id,
                         name=job.name,
+                        replace_existing=True,
                         **job.kwargs
                     )
 

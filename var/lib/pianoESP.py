@@ -51,7 +51,7 @@ class ESPAPIClient(APIClientInterface):
     def __init__(self, site_id: int, api_key: str, *, http_client=None, logger: logging.Logger = None):
         self.site_id = site_id
         self._api_key = api_key
-        self._http_client = http_client or Client(base_url=self.ENDPOINT, params={"api_key": self._api_key})
+        self._http_client = http_client or Client(base_url=self.ENDPOINT, timeout=10, params={"api_key": self._api_key})
         self._logger = logger or logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
     @timeout_backoff(max_retries=10, multiplier=2)
