@@ -11,7 +11,7 @@ class APIClientException(APIException):
     pass
 
 
-class AbstractAPIClient(abc.ABC):
+class APIClientInterface(abc.ABC):
     ENDPOINT:str
 
     @abc.abstractmethod

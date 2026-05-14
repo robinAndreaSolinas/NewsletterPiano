@@ -1,15 +1,50 @@
 from __future__ import annotations
 import datetime
+import functools
+import time
 from typing import Dict, Any, List
-from httpx import Client, HTTPStatusError
+import httpx
+from httpx import Client, HTTPStatusError, Timeout
 import logging
-from .utils import camel_to_snake, Singleton, AbstractAPIClient, APIException
+from var.lib.utils import camel_to_snake, Singleton, APIClientInterface, APIException
 
 
 class PianoESPException(APIException):
     pass
 
-class ESPAPIClient(AbstractAPIClient):
+
+def timeout_backoff(max_retries: int = 3, multiplier: float = 2, *, base_delay = None):
+    logger = logging.getLogger(__name__)
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            delay = base_delay
+            for iter in range(1, max_retries + 1):
+                try:
+                    logger.debug(f"trying {func.__name__} with {args ,kwargs}")
+                    return func(*args, **kwargs)
+                except httpx.TimeoutException as e:
+
+                    kwargs["timeout"] = kwargs.pop("timeout", 5) + (multiplier * iter)
+
+                    logger.info(f"Timeout exception: {e} => "
+                                f"{args[0]} call {args[1] if len(args) > 1 else kwargs.get('path', '')!r}: "
+                                f"{iter}/{max_retries} next retry with timeout {kwargs.get('timeout')!r}")
+
+                    if base_delay is not None:
+                        time.sleep(delay)
+                        delay *= multiplier
+
+                    if iter == max_retries + 1:
+                        raise
+
+            return func(*args, **kwargs)
+        return wrapper
+
+    return decorator
+
+
+class ESPAPIClient(APIClientInterface):
 
     ENDPOINT = "https://api-esp.piano.io"
 
@@ -19,8 +54,9 @@ class ESPAPIClient(AbstractAPIClient):
         self._http_client = http_client or Client(base_url=self.ENDPOINT, params={"api_key": self._api_key})
         self._logger = logger or logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
+    @timeout_backoff(max_retries=10, multiplier=2)
     def call_api(self, path: str, method: str = "GET", **kwargs) -> Dict[str, Any]:
-        logger = self._logger.parent.getChild(f"{__name__}.{__class__.__name__}")
+        logger = self._logger.parent.getChild(f"{__class__.__name__}")
 
         if method.upper() not in ("GET", "POST", "PUT", "DELETE"):
             logger.error(f"Invalid HTTP method: {method!r}")
