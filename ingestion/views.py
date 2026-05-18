@@ -15,7 +15,7 @@ from django.utils import timezone
 __KEYS = json.loads(settings.SECRET_KEYS.read_text())
 _logger = logging.getLogger(__name__.split(".")[0])
 
-yesterday = timezone.now().date() - datetime.timedelta(days=1)
+yesterday = lambda: timezone.now().date() - datetime.timedelta(days=1)
 
 def _get_all_campaigns(only_active=True):
     cp = set()
@@ -93,8 +93,10 @@ def stats_refining(stats, available_groups: Iterable[str] = None):
     return reorganize(rawrefine(stats))
 
 
-@job("cron", hour=1, kwargs={"start": yesterday, "end": yesterday}) # ? every day at 1am
-def ingest_analytics(start:datetime.datetime, end:datetime.datetime):
+@job("cron", hour=1)
+def ingest_analytics(start:datetime.datetime = None, end:datetime.datetime = None):
+    start = start or models.Analytics.objects.order_by("-date").values("date").first().get("date", yesterday())
+    end = end or yesterday()
     bulk_analytics = []
     remote_campaigns = ingest_campaigns() ## ingest campaigns before analytics
 
