@@ -106,3 +106,17 @@ def get_aggregated_stats(request, from_date: str, to_date: str = None, campaign_
         return JsonResponse({"stats": [], "success": True}, status=200)
 
     return JsonResponse({"stats": list(valid_response), "success": True})
+
+def get_users(request):
+    campaings = Campaign.objects.values("name", "fetched_at", "total_users", "total_active_users").all()
+
+    users = []
+    for c in campaings:
+        users.append({
+            "campaign": c["name"],
+            "date": c["fetched_at"].strftime("%Y-%m-%d"),
+            "total_users": c["total_users"],
+            "active_users": c["total_active_users"]
+        })
+
+    return JsonResponse(users, safe=False)

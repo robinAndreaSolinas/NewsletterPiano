@@ -14,5 +14,5 @@ urlpatterns = [
         rf"stats/aggregate/(?P<from_date>{DATE_PATTERN})(/(?P<to_date>{DATE_PATTERN}))?(/(?P<campaign_id>[0-9]+))?$",
         views.get_aggregated_stats
     ),
-
+    path(f"stats/users", views.get_users, name="users")
 ]
