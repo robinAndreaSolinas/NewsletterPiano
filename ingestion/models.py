@@ -10,6 +10,8 @@ class Campaign(models.Model):
     site_id = models.IntegerField()
     schedule_type = models.CharField(max_length=100)
     mailing_list_id = models.IntegerField()
+    total_users = models.BigIntegerField(default=0)
+    total_active_users = models.BigIntegerField(default=0)
     fetched_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

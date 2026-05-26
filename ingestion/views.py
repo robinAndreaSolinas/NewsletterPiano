@@ -29,31 +29,54 @@ def _get_all_campaigns(only_active=True):
             }
 
 
-def ingest_campaigns(replace: bool = False):
+def _get_alluser_campaigns(only_active=True):
+    users = {}
+    for k in __KEYS.get("items", []):
+        client = piano.ClientESP(k.get("id"), k.get("api_key"))
+        users.update(
+            client.get_all_subscribers(
+                client.get_all_mailing_lists(only_active)
+            )
+        )
+    return users
+
+
+def ingest_campaigns():
     remote_campaigns = tuple(_get_all_campaigns())
+    all_users = _get_alluser_campaigns()
     _logger.debug(f"Starting to ingest {len(remote_campaigns)} campaigns")
 
-    existing = set(
-        models.Campaign.objects.filter(
-            campaign_id__in=[c.id for c in remote_campaigns]
-        ).values_list("campaign_id", "site_id", "name", "active", "schedule_type")
-    )
+    bulk_campaigns = []
+    for c in remote_campaigns:
+        mailing_list_id = c.get_mailing_list()[0].id if c.get_mailing_list() else None
+        users = all_users.get(str(mailing_list_id), {})
 
-    bulk_campaigns = [
-        models.Campaign(
-            campaign_id=c.id,
-            site_id=c.site_id,
-            name=c.friendly_name,
-            active=c.active,
-            schedule_type=c.schedule_type,
-            mailing_list_id=c.get_mailing_list()[0].id if c.get_mailing_list() else None,
+        bulk_campaigns.append(
+            models.Campaign(
+                campaign_id=c.id,
+                site_id=c.site_id,
+                name=c.friendly_name,
+                active=c.active,
+                schedule_type=c.schedule_type,
+                mailing_list_id=mailing_list_id,
+                total_users=users.get(
+                    "squad_users", 0),
+                total_active_users=users.get("squad_users_active", 0),
+                fetched_at=timezone.now(),
+            )
         )
-        for c in remote_campaigns
-        if (c.id, c.site_id, c.friendly_name, c.active, c.schedule_type) not in existing
-    ]
 
 
-    models.Campaign.objects.bulk_create(bulk_campaigns)
+
+    models.Campaign.objects.bulk_create(
+        bulk_campaigns,
+        update_conflicts=True,
+        unique_fields=["campaign_id"],
+        update_fields=[
+            "site_id", "name", "mailing_list_id",
+            "total_users", "total_active_users", "fetched_at"
+        ],
+    )
     _logger.info(f"Ingested {len(bulk_campaigns)} campaigns")
     return remote_campaigns
 
