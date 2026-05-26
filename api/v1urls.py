@@ -16,5 +16,8 @@ urlpatterns = [
     ),
     path(f"stats/users", views.get_users, name="users"),
 
+    re_path(rf"table/(?P<from_date>{DATE_PATTERN})(/(?P<to_date>{DATE_PATTERN}))?(/(?P<site>qn|rdc|naz|gio|lux))?$",
+            views.visual_table_campaigns, name="table"),
+
     re_path(f"image/(?P<from_date>{DATE_PATTERN})(/(?P<to_date>{DATE_PATTERN}))?", img_views.img_view, name="image")
 ]

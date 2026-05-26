@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Statistiche del {{ date }} </title>
+    <style>
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      th, td {
+        border: 1px solid #e0e0e0;
+        padding: 0.5rem 1rem;
+      }
+      th {
+        text-align: left;
+      }
+      td:nth-child(n+3) {
+        text-align: right;
+      }
+      thead tr {
+        background-color: #f5f5f5;
+      }
+      tbody tr:hover {
+        background-color: #fafafa;
+      }
+    </style>
+</head>
+<body>
+
+<div class="table-container" style="margin: 2rem 20rem">
+  <div class="table-header">
+  <h1>{{ site|default:"" }}</h1>
+    <h2>{% if not to_date  %}
+    	Statistiche delle campagne del giorno {{ from_date }}
+    {% else %}
+        Statistiche delle campagne <i> dal {{ from_date }} al {{ to_date }} </i>
+    {% endif %}
+    </h2>
+  </div>
+  <nav style="width: 100%; display: flex; justify-content: space-between;">
+      <div>
+          <a style="display:inline-block; margin-left: 1rem" href="/api/v1/table/{{ from_date|date:"Ymd" }}{% if to_date %}/{{ to_date|date:"Ymd" }}{% endif %}">Tutti</a>
+          {% for key, name in menu_sites.items %}
+              <a style="display:inline-block; margin-left: 1rem" href="/api/v1/table/{{ from_date|date:"Ymd" }}{% if to_date %}/{{ to_date|date:"Ymd" }}{% endif %}/{{ key }}">{{ name|title }}</a>
+          {% endfor %}
+      </div>
+
+      <div>
+          <label style="display: block">
+              dal:
+              <input
+                type="date"
+                id="from_date-picker"
+                name="from_date"
+                value="{{ from_date|date:'Y-m-d' }}"
+              >
+          </label>
+
+          <label style="display: block">
+              al:
+            <input
+                type="date"
+                id="to_date-picker"
+                name="to_date"
+                value="{{ to_date|date:'Y-m-d' }}"
+            >
+          </label>
+        <button onclick="navigateToDate()">Cambia Data</button>
+      </div>
+
+    <script>
+    function navigateToDate() {
+        const fromDate = document.getElementById('from_date-picker').value.replace(/-/g, '');
+        const toDate = document.getElementById('to_date-picker').value.replace(/-/g, '');
+
+        if (!fromDate || !toDate) return;
+
+        // estrae il site_id se presente: /api/v1/table/20250101/20250201/SITE_ID
+        const match = window.location.pathname.match(/\/api\/v1\/table\/\d{8}\/\d{8}(?:\/(\w+))?/);
+        const siteId = match?.[1];
+
+        let newUrl = `/api/v1/table/${fromDate}/${toDate}`;
+        if (siteId) newUrl += `/${siteId}`;
+
+        window.location.href = newUrl;
+    }
+    </script>
+  </nav>
+    <hr>
+  {% if object_list %}
+  <table>
+    <thead>
+      <tr>
+        <th>Campagna</th>
+        <th>Data</th>
+        <th>Inviati</th>
+        <th>Aperti</th>
+        <th>Open Rate</th>
+        <th>Cliccati</th>
+        <th>Click Rate</th>
+{#        <th>Iscritti</th>#}
+{#        <th>Disiscritti</th>#}
+
+        <th>Totale Utenti</th>
+        <th>Utenti Attivi</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for obj in object_list %}
+      <tr>
+        <td>{% firstof obj.campaign.name obj.campaign__name "—" %}</td>
+        <td>
+            {% if obj.date %}
+                {{ obj.date }}
+            {% elif from_date and to_date %}
+                {{ from_date|date:'j' }} - {{ to_date }}
+            {% else %}
+                —
+            {% endif %}
+        </td>
+        <td>{{ obj.sent }}</td>
+        <td>{{ obj.opened }}</td>
+        <td>{% widthratio obj.opened obj.sent 100 %}%</td>
+        <td>{{ obj.clicked }}</td>
+        <td>{% widthratio obj.clicked obj.sent 100 %}%</td>
+{#        <td>{{ obj.subscribed }}</td>#}
+{#        <td>{{ obj.unsubscribed|default:0 }}</td>#}
+        <td>{% firstof obj.campaign.total_users obj.campaign__total_users 0 %}</td>
+        <td>{% firstof obj.campaign.total_active_users obj.campaign__total_active_users 0 %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% else %}
+  <p class="empty">Nessun risultato trovato.</p>
+  {% endif %}
+</div>
+
+</body>
+</html>

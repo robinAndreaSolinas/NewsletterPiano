@@ -2,6 +2,9 @@ import datetime
 
 from django.db.models import Sum, When, Value, CharField, Case
 from django.http import JsonResponse
+from django.shortcuts import render
+
+from conf import settings
 from ingestion.models import Analytics, Campaign
 
 
@@ -125,6 +128,7 @@ def get_aggregated_stats(request, from_date: str, to_date: str = None, campaign_
 
     return JsonResponse({"stats": list(valid_response), "success": True})
 
+
 def get_users(request):
     campaigns = Campaign.objects.annotate(
         **C_site_annotation
@@ -141,3 +145,59 @@ def get_users(request):
         })
 
     return JsonResponse(users, safe=False)
+
+def mapping_site_id(site: str):
+    import json
+    set = json.loads(settings.SECRET_KEYS.read_text())
+
+    match site:
+        case "qn":
+            return [i for i in set.get("items") if i.get("name") in ("Quotidiano Nazionale", "Luce")]
+        case "rdc":
+            return [i for i in set.get("items") if i.get("name") == "Il Resto del Carlino"]
+        case "naz":
+            return [i for i in set.get("items") if i.get("name") == "La Nazione"]
+
+        case "gio":
+            return [i for i in set.get("items") if i.get("name") == "Il Giorno"]
+        case "lux":
+            return [i for i in set.get("items") if i.get("name") == "Luce"]
+    return []
+
+
+def visual_table_campaigns(request, from_date: str, to_date:str=None, site:str = None):
+    filter = {}
+    from_date = datetime.datetime.strptime(from_date, "%Y%m%d").date()
+    to_date = datetime.datetime.strptime(to_date, "%Y%m%d").date() if to_date else None
+    to_date = to_date if to_date and to_date > from_date else None
+
+    site = mapping_site_id(site)
+
+    if site: filter['campaign__site_id__in'] = (s.get("id") for s in site)
+
+    if not to_date:
+        analytics = Analytics.objects.select_related("campaign").filter(date=from_date, **filter).all()
+    else:
+
+        filter["date__range"] = (from_date, to_date)
+
+        analytics = Analytics.objects.filter(**filter).values("campaign__name", "campaign__total_users", "campaign__total_active_users").annotate(
+                sent=Sum("sent"),
+                opened=Sum("opened"),
+                clicked=Sum("clicked"),
+                subscribed=Sum("subscribed"),
+                unsubscribed=Sum("unsubscribed")
+            )
+
+    return render(request, "table.html", {
+        "from_date": from_date,
+        "to_date": to_date,
+        "menu_sites": {
+            "rdc": mapping_site_id("rdc")[0].get("name"),
+            "qn":mapping_site_id("qn")[0].get("name"),
+            "naz":mapping_site_id("naz")[0].get("name"),
+            "gio":mapping_site_id("gio")[0].get("name"),
+            "lux":mapping_site_id("lux")[0].get("name")},
+        "site": site[0].get("name", "").title() if site else None,
+        "object_list": analytics,
+    })
