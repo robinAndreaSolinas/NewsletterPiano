@@ -1,12 +1,30 @@
 import datetime
 
-from django.db.models import Sum
+from django.db.models import Sum, When, Value, CharField, Case
 from django.http import JsonResponse
 from ingestion.models import Analytics, Campaign
 
 
 # Create your views here.
 
+C_site_annotation = {"site": Case(
+        When(site_id=594, then=Value("gio")),
+        When(site_id=595, then=Value("rdc")),
+        When(site_id=596, then=Value("naz")),
+        When(site_id=808, then=Value("lux")),
+        When(site_id=557, then=Value("qn")),
+        default=Value("unknown"),
+        output_field=CharField(),
+)}
+A_site_annotation = {"site": Case(
+        When(campaign__site_id=594, then=Value("gio")),
+        When(campaign__site_id=595, then=Value("rdc")),
+        When(campaign__site_id=596, then=Value("naz")),
+        When(campaign__site_id=808, then=Value("lux")),
+        When(campaign__site_id=557, then=Value("qn")),
+        default=Value("unknown"),
+        output_field=CharField(),
+)}
 
 def index(request):
     return JsonResponse({"message": "Hello world", "status": "success"})
@@ -26,12 +44,12 @@ def get_stats(request, from_date: str = None, to_date: str = None, campaign_id =
             campaign__active=True,
             date__range=(from_date, to_date),
             campaign_id=campaign_id
-        ).values("campaign__name", "date", "sent", "opened", "clicked", "subscribed", "unsubscribed").order_by(order)
+        ).annotate(**A_site_annotation).values("campaign__name", "site", "date", "sent", "opened", "clicked", "subscribed", "unsubscribed").order_by(order)
     else:
         analytics = Analytics.objects.filter(
             campaign__active=True,
             date__range=(from_date, to_date)
-        ).values("campaign__name", "date", "sent", "opened", "clicked", "subscribed", "unsubscribed").order_by(order)
+        ).annotate(**A_site_annotation).values("campaign__name", "site", "date", "sent", "opened", "clicked", "subscribed", "unsubscribed").order_by(order)
 
     valid_response = []
     for a in list(analytics):
@@ -73,7 +91,7 @@ def get_aggregated_stats(request, from_date: str, to_date: str = None, campaign_
                 opened=Sum("opened"),
                 clicked=Sum("clicked"),
                 subscribed=Sum("subscribed"),
-                unsubscribed=Sum("unsubscribed")
+                unsubscribed=Sum("unsubscribed"),
             )
         else:
             analytics = Analytics.objects.filter(
@@ -84,7 +102,7 @@ def get_aggregated_stats(request, from_date: str, to_date: str = None, campaign_
                 opened=Sum("opened"),
                 clicked=Sum("clicked"),
                 subscribed=Sum("subscribed"),
-                unsubscribed=Sum("unsubscribed")
+                unsubscribed=Sum("unsubscribed"),
             )
 
     except (Analytics.DoesNotExist, Campaign.DoesNotExist):
@@ -108,12 +126,15 @@ def get_aggregated_stats(request, from_date: str, to_date: str = None, campaign_
     return JsonResponse({"stats": list(valid_response), "success": True})
 
 def get_users(request):
-    campaings = Campaign.objects.values("name", "fetched_at", "total_users", "total_active_users").all()
+    campaigns = Campaign.objects.annotate(
+        **C_site_annotation
+    ).values("name", "site", "fetched_at", "total_users", "total_active_users").all()
 
     users = []
-    for c in campaings:
+    for c in campaigns:
         users.append({
             "campaign": c["name"],
+            "site": c['site'],
             "date": c["fetched_at"].strftime("%Y-%m-%d"),
             "total_users": c["total_users"],
             "active_users": c["total_active_users"]
