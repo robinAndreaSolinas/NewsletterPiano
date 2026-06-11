@@ -92,8 +92,26 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': DATA_DIR / 'db.sqlite3',
-    }
+    },
 }
+
+IMAGE_CONFIG = {
+    "DB_NAME": "db_image_readonly",
+    "DB_TABLE": os.getenv("DB_TABLE", "article_image"),
+    "DB_FIELD": "image"
+}
+
+if os.getenv("DB_IMAGE"):
+    DATABASES[f"{IMAGE_CONFIG['DB_NAME']}"] = {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': f"file:{os.getenv('DB_IMAGE')}?mode=ro",
+            'OPTIONS': {'uri': True},
+            'TEST': {'NAME': ':memory:'},  # evita errori in test se il file non esiste
+    }
+
+
+
+DATABASE_ROUTERS = ['conf.routers.ReadOnlyRouter']
 
 
 # Password validation
