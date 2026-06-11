@@ -1,9 +1,11 @@
+import json
 from urllib.parse import urlparse
 
 import httpx
 from django.core import validators
 from django.http import JsonResponse, HttpResponseRedirect, HttpResponse, response
 from django.shortcuts import get_object_or_404, render
+from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from url_shorter.models import UrlShorter
@@ -33,10 +35,13 @@ def proxy(request, short_slug):
 
     return response
 
-
+@csrf_exempt
 def shortener(request):
     if request.method == "POST":
-        raw_url = request.POST.get("original_url")
+        try:
+            raw_url = json.loads(request.body).get("original_url")
+        except json.decoder.JSONDecodeError:
+            return JsonResponse({"error": "Payload JSON non valido"}, status=400)
         try:
             validators.URLValidator()(raw_url)
         except validators.ValidationError:
