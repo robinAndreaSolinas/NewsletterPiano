@@ -1,10 +1,18 @@
+from django.contrib.auth.templatetags import auth
 from django.urls import path, re_path
+from rest_framework.routers import DefaultRouter
+import views
+import image.views
+from rest_framework.authtoken import views as auth_views
 
-from . import views, img_views
+router = DefaultRouter(trailing_slash=False)
+router.register('image', image.views.ImageViewSet, basename='image')
+
+urlpatterns = router.urls
 
 DATE_PATTERN = r"\d{8}"
 
-urlpatterns = [
+urlpatterns += [
     path('', views.index),
     re_path(
         rf"stats(/(?P<from_date>{DATE_PATTERN}))?(/(?P<to_date>{DATE_PATTERN}))?/(all|campaign/(?P<campaign_id>[0-9]+))$",
@@ -16,5 +24,6 @@ urlpatterns = [
     ),
     path(f"stats/users", views.get_users, name="users"),
 
-    re_path(f"image/(?P<from_date>{DATE_PATTERN})(/(?P<to_date>{DATE_PATTERN}))?", img_views.img_view, name="image")
+    path('token/', auth_views.obtain_auth_token)
+
 ]
