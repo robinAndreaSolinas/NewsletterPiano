@@ -1,20 +1,16 @@
-import json
-from urllib.parse import urlparse
-
-import httpx
-from django.core import validators
-from django.http import JsonResponse, HttpResponseRedirect, HttpResponse, response
-from django.shortcuts import get_object_or_404, render
-from django.views.decorators.csrf import csrf_exempt
-from django.views.decorators.http import require_POST
-
+from django.http import HttpResponseRedirect
+from django.urls import reverse
+from django.shortcuts import get_object_or_404
+from rest_framework import mixins, viewsets
 from url_shorter.models import UrlShorter
-
+from url_shorter.serializers import UrlShorterSerializer
 
 # Create your views here.
 
-def proxy(request, short_slug):
-    item = get_object_or_404(UrlShorter, slug=short_slug, is_active=True, )
+
+def proxy(request, slug):
+    item = get_object_or_404(UrlShorter, slug=slug, is_active=True)
+    path = reverse(proxy, kwargs={'slug': item.slug})
     response = HttpResponseRedirect(item.original_url)
     response['Referrer-Policy'] = 'no-referrer'
     response['X-Content-Type-Options'] = 'nosniff'
@@ -28,38 +24,20 @@ def proxy(request, short_slug):
     response['X-Permitted-Cross-Domain-Policies'] = 'none'
     response['X-Redirect-From'] = request.META.get('HTTP_REFERER', '')
     response['X-Redirect-To'] = item.original_url
-    response['X-Short-URL'] = item.slug
+    response['X-Path'] = path
+    response['X-Short-URL'] = request.build_absolute_uri(path)
 
     item.clicks += 1
     item.save()
 
     return response
 
-@csrf_exempt
-def shortener(request):
-    if request.method == "POST":
-        try:
-            raw_url = json.loads(request.body).get("original_url")
-        except json.decoder.JSONDecodeError:
-            return JsonResponse({"error": "Payload JSON non valido"}, status=400)
-        try:
-            validators.URLValidator()(raw_url)
-        except validators.ValidationError:
-            return JsonResponse({"error": "Invalid URL"}, status=400)
-        try:
-            item = UrlShorter.objects.create(original_url=raw_url)
-        except :
-            item = UrlShorter.objects.get(original_url=raw_url)
-
-        return JsonResponse({
-            "input_data":{
-                "original_url": raw_url,
-                "created_at": item.created_at,
-            },
-            "short_url": request.build_absolute_uri(item.slug),
-
-        })
-
-
-    else:
-        return HttpResponse("Listen to the grumbling of deep space", content_type="text/plain")
+class UrlShorterViewSet(
+    mixins.ListModelMixin,
+    mixins.CreateModelMixin,
+    mixins.RetrieveModelMixin,
+    viewsets.GenericViewSet,
+):
+    queryset = UrlShorter.objects.all()
+    serializer_class = UrlShorterSerializer
+    lookup_field = 'slug'

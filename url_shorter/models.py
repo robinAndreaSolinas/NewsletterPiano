@@ -7,7 +7,7 @@ from django.db import models
 
 class UrlShorter(models.Model):
     CODE_SIZE = 6
-    original_url = models.CharField(max_length=255)
+    original_url = models.URLField(max_length=255)
     slug = models.CharField(max_length=15, unique=True)
     created_at = models.DateTimeField(auto_now_add=True)
     clicks = models.IntegerField(default=0)
@@ -20,7 +20,7 @@ class UrlShorter(models.Model):
 
         return super().save(*args, **kwargs)
 
-    def generate_slug(self, size, is_deterministic=False):
+    def generate_slug(self, size = CODE_SIZE, is_deterministic=True):
         if is_deterministic:
             return hashlib.sha256(f"{self.original_url}".encode()).hexdigest()[:size + 2]
         else:

@@ -17,8 +17,10 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path, include
 
+import url_shorter.views
+
 urlpatterns = [
     path('__administration/', admin.site.urls),
-    path('sh/', include('url_shorter.urls')),
+    path("sh/<slug:slug>/", url_shorter.views.proxy, name="shortener_proxy"),
     path('api/v1/', include('api.v1urls')),
 ]
