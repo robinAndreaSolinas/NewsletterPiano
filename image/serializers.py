@@ -9,9 +9,9 @@ class ImageSerializer(serializers.ModelSerializer):
     domain = serializers.SerializerMethodField() # method mapped fields (get_domain)
 
     def get_domain(self, obj):
-
-        if obj.get("url"):
-            return urlparse(obj.get("url")).netloc
+        url = obj.url
+        if url:
+            return urlparse(url).netloc
         return ""
 
     class Meta:

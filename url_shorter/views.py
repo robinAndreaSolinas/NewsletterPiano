@@ -1,15 +1,12 @@
 from django.http import HttpResponseRedirect
 from django.urls import reverse
 from django.shortcuts import get_object_or_404
-from rest_framework import status
-from rest_framework.decorators import api_view
-from rest_framework.response import Response
-
+from rest_framework import mixins, viewsets
 from url_shorter.models import UrlShorter
 from url_shorter.serializers import UrlShorterSerializer
 
-
 # Create your views here.
+
 
 def proxy(request, slug):
     item = get_object_or_404(UrlShorter, slug=slug, is_active=True)
@@ -35,19 +32,12 @@ def proxy(request, slug):
 
     return response
 
-@api_view(["POST"])
-def url_shortener(request):
-    """
-    Examples:
-        ```
-        {
-        "url": "http://example.com"
-        }
-        ```
-    """
-    serializer = UrlShorterSerializer(data=request.data, context={"request": request})
-    if serializer.is_valid():
-        serializer.save()
-        return Response(serializer.data,)
-    else:
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+class UrlShorterViewSet(
+    mixins.ListModelMixin,
+    mixins.CreateModelMixin,
+    mixins.RetrieveModelMixin,
+    viewsets.GenericViewSet,
+):
+    queryset = UrlShorter.objects.all()
+    serializer_class = UrlShorterSerializer
+    lookup_field = 'slug'
