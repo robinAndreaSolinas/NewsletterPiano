@@ -51,6 +51,8 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     *register_app(BASE_DIR),
     'django_apscheduler',
+    'rest_framework',
+    'rest_framework.authtoken'
 ]
 
 MIDDLEWARE = [
@@ -84,6 +86,28 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'conf.wsgi.application'
 
+# Rest Framework
+REST_FRAMEWORK = {
+    'DEFAULT_PAGINATION_CLASS':(
+        'rest_framework.pagination.PageNumberPagination'
+    ),
+    "PAGE_SIZE": 100,
+    'DEFAULT_RENDERER_CLASSES': (
+        'rest_framework.renderers.JSONRenderer',
+    ),
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'rest_framework.authentication.TokenAuthentication',
+        'rest_framework.authentication.SessionAuthentication'
+
+    ),
+    'DEFAULT_PERMISSION_CLASSES': (
+        "rest_framework.permissions.DjangoModelPermissions",
+    )
+}
+
+if DEBUG:
+    REST_FRAMEWORK.pop("DEFAULT_RENDERER_CLASSES")
+
 
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
@@ -92,8 +116,26 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': DATA_DIR / 'db.sqlite3',
-    }
+    },
 }
+
+IMAGE_CONFIG = {
+    "DB_NAME": "db_image_readonly",
+    "DB_TABLE": os.getenv("DB_TABLE", "article_image"),
+    "DB_FIELD": "image"
+}
+
+if os.getenv("DB_IMAGE"):
+    DATABASES[f"{IMAGE_CONFIG['DB_NAME']}"] = {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': f"file:{os.getenv('DB_IMAGE')}?mode=ro",
+            'OPTIONS': {'uri': True},
+            'TEST': {'NAME': ':memory:'},  # evita errori in test se il file non esiste
+    }
+
+
+
+DATABASE_ROUTERS = ['conf.routers.ReadOnlyRouter']
 
 
 # Password validation

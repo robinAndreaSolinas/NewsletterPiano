@@ -21,7 +21,7 @@ def _get_all_campaigns(only_active=True):
     cp = set()
     for k in __KEYS.get("items", []):
         client = piano.ClientESP(k.get("id"), k.get("api_key"))
-        cp |= set(client.get_all_campaigns())
+        cp |= set(client.get_all_campaigns(only_active))
 
     return {c
             for c in cp
@@ -42,13 +42,17 @@ def _get_alluser_campaigns(only_active=True):
 
 
 def ingest_campaigns():
-    remote_campaigns = tuple(_get_all_campaigns())
+    # Recupera tutte le campagne (attive e non)
+    all_remote_campaign = {c for c in _get_all_campaigns(only_active=False) if c.schedule_type == "regular"}
     all_users = _get_alluser_campaigns()
-    _logger.debug(f"Starting to ingest {len(remote_campaigns)} campaigns")
+
+    _logger.debug(f"Starting to ingest {len(all_remote_campaign)} remote campaigns")
 
     bulk_campaigns = []
-    for c in remote_campaigns:
+    for c in all_remote_campaign:
         mailing_list_id = c.get_mailing_list()[0].id if c.get_mailing_list() else None
+        if not mailing_list_id:
+            continue
         users = all_users.get(str(mailing_list_id), {})
 
         bulk_campaigns.append(
@@ -56,30 +60,36 @@ def ingest_campaigns():
                 campaign_id=c.id,
                 site_id=c.site_id,
                 name=c.friendly_name,
-                active=c.active,
+                active=c.active,  # Passa il valore reale (True o False)
                 schedule_type=c.schedule_type,
                 mailing_list_id=mailing_list_id,
-                total_users=users.get(
-                    "squad_users", 0),
+                total_users=users.get("squad_users", 0),
                 total_active_users=users.get("squad_users_active", 0),
                 fetched_at=timezone.now(),
             )
         )
 
-
-
+    # Esegue l'upsert nel database
     models.Campaign.objects.bulk_create(
         bulk_campaigns,
         update_conflicts=True,
         unique_fields=["campaign_id"],
         update_fields=[
-            "site_id", "name", "mailing_list_id",
-            "total_users", "total_active_users", "fetched_at"
+            "site_id",
+            "name",
+            "mailing_list_id",
+            "total_users",
+            "total_active_users",
+            "fetched_at",
+            "active"  # FONDAMENTALE: permette a Django di aggiornare lo stato se cambia in False
         ],
     )
-    _logger.info(f"Ingested {len(bulk_campaigns)} campaigns")
-    return remote_campaigns
 
+    _logger.info(f"Ingested {len(bulk_campaigns)} campaigns")
+
+    # Mantiene il valore di ritorno originale filtrando solo quelle attive
+    active_remote_campaign = tuple(c for c in all_remote_campaign if c.active)
+    return active_remote_campaign
 
 def stats_refining(stats, available_groups: Iterable[str] = None):
 
@@ -122,6 +132,7 @@ def ingest_analytics(start:datetime.datetime = None, end:datetime.datetime = Non
     end = end or yesterday()
     bulk_analytics = []
     remote_campaigns = ingest_campaigns() ## ingest campaigns before analytics
+    exit(124)
 
     _logger.info(f"Starting to ingest analytics for {len(remote_campaigns)} campaigns")
     _logger.info(f"Analytics range: {start} - {end}")
