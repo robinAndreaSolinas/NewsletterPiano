@@ -1,6 +1,12 @@
 #!/bin/sh
 set -e
 
+# Normalize DEBUG: only uppercase TRUE or 1 → 1, anything else → ""
+case "${DEBUG:-}" in
+  TRUE|1) DEBUG=1 ;;
+  *)      DEBUG=""  ;;
+esac
+
 is_shell() {
     grep -qx "$(command -v "$1" 2>/dev/null)" /etc/shells 2>/dev/null
 }
@@ -23,7 +29,6 @@ help() {
 
   printf "  <shell>            Open an system shell (e.g. sh, bash)\n"
   is_verbose "$@" && printf "                     Reads '/etc/shells' for valid shell list\n"
-
 }
 
 is_verbose() {
@@ -52,8 +57,12 @@ runServer(){
     exec gunicorn --bind "$HOST":"$PORT" --threads "$WORKER_THREADS" $RELOAD "$@"
 }
 
-main (){
+main(){
   case "$1" in
+  "")
+    help
+    exit 0
+    ;;
   start)
     shift
     runServer "$@"
@@ -82,7 +91,7 @@ main (){
       exit 1
     fi
     ;;
-esac
+  esac
 }
 
 main "$@"
