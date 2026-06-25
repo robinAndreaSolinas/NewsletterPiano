@@ -15,8 +15,6 @@ router.register('shortener', url_shorter.views.UrlShorterViewSet, basename='shor
 
 urlpatterns = router.urls
 
-DATE_PATTERN = r"\d{8}"
-
 urlpatterns += [
     path('token', auth_views.obtain_auth_token)
 

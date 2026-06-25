@@ -28,7 +28,7 @@ LOG_DIR.mkdir(parents=True, exist_ok=True)
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-1Bu~~G5rMYTpm*k1spDF`@C"c#C;%ah]6gJtRCa@Ue;`FFn95MTM?=W;<pvASoYPp&TJy@U:y;'
+SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-1Bu~~G5rMYTpm*k1spDF`@C"c#C;%ah]6gJtRCa@Ue;`FFn95MTM?=W;<pvASoYPp&TJy@U:y;' )
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = (os.getenv("DEBUG", "False").upper() == "TRUE" or
@@ -174,6 +174,8 @@ USE_TZ = False
 
 STATIC_URL = 'static/'
 
+STATIC_ROOT = DATA_DIR / 'static/'
+
 SECRET_KEYS = (DATA_DIR / "secrets.json")
 SECRET_KEYS.touch(mode=0o600, exist_ok=True)
 
@@ -217,3 +219,12 @@ LOGGING = {
         },
     },
 }
+
+## Security for Deploy
+
+# SECURE_HSTS_PRELOAD = bool(os.getenv("DJANGO_APP", False).upper() == "PROD")
+# SECURE_HSTS_SECONDS = bool(os.getenv("DJANGO_APP", False).upper() == "PROD")
+# SECURE_HSTS_INCLUDE_SUBDOMAINS = bool(os.getenv("DJANGO_APP", False).upper() == "PROD")
+# SECURE_SSL_REDIRECT = bool(os.getenv("DJANGO_APP", False).upper() == "PROD")
+# SESSION_COOKIE_SECURE = bool(os.getenv("DJANGO_APP", False).upper() == "PROD")
+# CSRF_COOKIE_SECURE = bool(os.getenv("DJANGO_APP", False).upper() == "PROD")
