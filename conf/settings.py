@@ -52,7 +52,8 @@ INSTALLED_APPS = [
     *register_app(BASE_DIR),
     'django_apscheduler',
     'rest_framework',
-    'rest_framework.authtoken'
+    'rest_framework.authtoken',
+    'drf_spectacular'
 ]
 
 MIDDLEWARE = [
@@ -99,11 +100,17 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework.authentication.TokenAuthentication',
         'rest_framework.authentication.SessionAuthentication'
-
     ),
     'DEFAULT_PERMISSION_CLASSES': (
         "rest_framework.permissions.DjangoModelPermissions",
-    )
+    ),
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+}
+
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'La Mia API',
+    'DESCRIPTION': 'Documentazione della mia API',
+    'VERSION': '1.0.0',
 }
 
 if DEBUG:

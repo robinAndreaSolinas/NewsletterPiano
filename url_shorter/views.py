@@ -38,6 +38,6 @@ class UrlShorterViewSet(
     mixins.RetrieveModelMixin,
     viewsets.GenericViewSet,
 ):
-    queryset = UrlShorter.objects.all()
+    queryset = UrlShorter.objects.order_by("-created_at").all()
     serializer_class = UrlShorterSerializer
     lookup_field = 'slug'

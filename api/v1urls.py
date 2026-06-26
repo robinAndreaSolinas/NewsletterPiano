@@ -17,5 +17,4 @@ urlpatterns = router.urls
 
 urlpatterns += [
     path('token', auth_views.obtain_auth_token)
-
 ]

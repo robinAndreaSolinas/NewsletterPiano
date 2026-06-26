@@ -42,5 +42,6 @@ class CampaignSerializer(serializers.ModelSerializer):
                   "schedule_type",
                   "mailing_list_id",
                   "total_users",
-                  "total_active_users"
+                  "total_active_users",
+                  "fetched_at"
                   )
