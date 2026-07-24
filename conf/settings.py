@@ -236,3 +236,6 @@ LOGGING = {
 # SECURE_SSL_REDIRECT = bool(os.getenv("DJANGO_APP", False).upper() == "PROD")
 # SESSION_COOKIE_SECURE = bool(os.getenv("DJANGO_APP", False).upper() == "PROD")
 # CSRF_COOKIE_SECURE = bool(os.getenv("DJANGO_APP", False).upper() == "PROD")
+CSRF_TRUSTED_ORIGINS=(
+	*set(os.getenv('DJANGO_CSRF_TRUSTED_ORIGINS', '').split(',')) - {'', None},
+)
