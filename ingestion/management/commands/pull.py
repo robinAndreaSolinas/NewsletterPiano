@@ -7,8 +7,8 @@ from ingestion.tasks import ingest_campaigns, ingest_analytics
 
 class Command(BaseCommand):
     help = (
-        "Lancia in background (via Celery) l'ingestion di 'campaign' (senza parametri) "
-        "o 'analytics' (con --start e --end opzionale, default ieri)."
+        "Lancia (via Celery) e attende il completamento dell'ingestion di 'campaign' "
+        "(senza parametri) o 'analytics' (con --start e --end opzionale, default ieri)."
     )
 
     DATE_FORMAT = "%Y%m%d"
@@ -50,12 +50,15 @@ class Command(BaseCommand):
                 )
             )
 
-        self.stdout.write(self.style.NOTICE("Lancio task celery 'ingest_campaigns' in background"))
+        self.stdout.write(self.style.NOTICE("Lancio task celery 'ingest_campaigns'"))
 
         task = ingest_campaigns.delay()
+        self.stdout.write(self.style.NOTICE(f"Task schedulato (id={task.id}), attendo il completamento..."))
+
+        result = self._wait_for_task(task)
 
         self.stdout.write(
-            self.style.SUCCESS(f"Task 'ingest_campaigns' schedulato (id={task.id})")
+            self.style.SUCCESS(f"Task 'ingest_campaigns' completato. Risultato: {result}")
         )
 
     def _handle_analytics(self, options):
@@ -83,14 +86,28 @@ class Command(BaseCommand):
 
         self.stdout.write(
             self.style.NOTICE(
-                f"Lancio task celery 'ingest_analytics' in background per il periodo {start} -> {end}"
+                f"Lancio task celery 'ingest_analytics' per il periodo {start} -> {end}"
             )
         )
 
         task = ingest_analytics.delay(
             start.strftime(self.DATE_FORMAT), end.strftime(self.DATE_FORMAT)
         )
+        self.stdout.write(self.style.NOTICE(f"Task schedulato (id={task.id}), attendo il completamento..."))
+
+        result = self._wait_for_task(task)
 
         self.stdout.write(
-            self.style.SUCCESS(f"Task 'ingest_analytics' schedulato (id={task.id})")
+            self.style.SUCCESS(f"Task 'ingest_analytics' completato. Risultato: {result}")
         )
+
+    def _wait_for_task(self, task):
+        """
+        Blocca l'esecuzione del comando finché il task Celery non termina
+        (con successo o con errore), e ne ritorna il risultato.
+        """
+        try:
+            # timeout=None => attende indefinitamente il completamento
+            return task.get(timeout=None)
+        except Exception as exc:
+            raise CommandError(f"Il task {task.id} ha fallito: {exc}")
