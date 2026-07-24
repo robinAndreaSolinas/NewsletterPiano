@@ -1,0 +1,62 @@
+services:
+  web:
+    build: .
+    container_name: NewsletterPiano
+    env_file: .env
+    environment:
+      DJANGO_DEBUG: "False"
+      POSTGRES_DB: "postgres"
+      POSTGRES_USER: "postgres"
+      POSTGRES_PASSWORD: "postgres"
+      POSTGRES_HOST: "postgres"
+      REDIS_URL: 'redis://redis:6379/0'
+    networks:
+      - proxynet
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=proxynet"
+      - "traefik.http.routers.web.rule=Host(`example.com`)"
+      - "traefik.http.routers.web.entrypoints=https"
+      - "traefik.http.routers.web.tls=true"
+      - "traefik.http.services.web.loadbalancer.server.port=8000"
+
+    restart: unless-stopped
+    volumes:
+      - ./var/data/:/app/var/data/
+      - ./ingestion/migrations/:/app/ingestion/migrations/
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  db:
+    image: postgres
+    environment:
+      POSTGRES_DB: "postgres"
+      POSTGRES_USER: "postgres"
+      POSTGRES_PASSWORD: "postgres"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+
+networks:
+  proxynet:
+    external: true

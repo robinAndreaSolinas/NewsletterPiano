@@ -4,7 +4,6 @@ from collections import defaultdict
 from typing import Iterable
 import logging
 from django.conf import settings
-from scheduler import job
 from var.lib import pianoESP as piano
 from ingestion import models
 from django.utils import timezone
@@ -126,7 +125,6 @@ def stats_refining(stats, available_groups: Iterable[str] = None):
     return reorganize(rawrefine(stats))
 
 
-@job("cron", hour=1)
 def ingest_analytics(start:datetime.datetime = None, end:datetime.datetime = None):
     start = start or models.Analytics.objects.order_by("-date").values("date").first().get("date", yesterday())
     end = end or yesterday()

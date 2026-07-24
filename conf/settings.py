@@ -34,7 +34,6 @@ SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-1Bu~~G5rMYTpm*k1spD
 DEBUG = (os.getenv("DEBUG", "False").upper() == "TRUE" or
          os.getenv("DEBUG", "False") == "1")
 
-
 ALLOWED_HOSTS = [
     *["localhost","127.0.0.1","[::1]"], # allow localhost
     *allowed_hosts_env(DEBUG)
@@ -50,7 +49,6 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     *register_app(BASE_DIR),
-    'django_apscheduler',
     'rest_framework',
     'rest_framework.authtoken',
     'drf_spectacular'
@@ -122,9 +120,23 @@ if DEBUG:
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': DATA_DIR / 'db.sqlite3',
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": os.getenv("POSTGRES_DB", "postgres"),
+        "USER": os.getenv("POSTGRES_USER", "postgres"),
+        "PASSWORD": os.getenv("POSTGRES_PASSWORD", "postgres"),
+        "HOST": os.getenv("POSTGRES_HOST", "127.0.0.1"),
+        "PORT": os.getenv("POSTGRES_PORT", "5432"),
+        'TEST': {
+            'NAME': DATA_DIR / 'test_db.sqlite3',
+        },
     },
+}
+
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": os.getenv("REDIS_URL")
+    }
 }
 
 IMAGE_CONFIG = {
@@ -140,8 +152,6 @@ if os.getenv("DB_IMAGE"):
             'OPTIONS': {'uri': True},
             'TEST': {'NAME': ':memory:'},  # evita errori in test se il file non esiste
     }
-
-
 
 DATABASE_ROUTERS = ['conf.routers.ReadOnlyRouter']
 

@@ -22,7 +22,7 @@ import url_shorter.views
 urlpatterns = [
     path('__administration/', admin.site.urls),
     path("sh/<slug:slug>/", url_shorter.views.proxy, name="shortener_proxy"),
-    path('api/v1/', include('api.v1urls')),
+    path('api/', include('api.urls')),
 
     path('api/schema', SpectacularAPIView.as_view(), name='schema'),
     path('api/doc', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),

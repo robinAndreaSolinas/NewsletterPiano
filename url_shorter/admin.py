@@ -1,6 +1,5 @@
 from django.contrib import admin
 from django.urls import reverse
-from django.utils.html import format_html
 
 from url_shorter import views
 from url_shorter.models import UrlShorter
