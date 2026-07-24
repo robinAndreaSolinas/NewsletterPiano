@@ -3,11 +3,16 @@ import json
 from collections import defaultdict
 from typing import Iterable
 import logging
+from celery import shared_task
+from celery.utils.log import get_task_logger
 from django.conf import settings
+from django.db import transaction
+
 from var.lib import pianoESP as piano
 from ingestion import models
 from django.utils import timezone
 
+logger = get_task_logger(__name__)
 
 # Create your views here.
 
@@ -39,7 +44,7 @@ def _get_alluser_campaigns(only_active=True):
         )
     return users
 
-
+@shared_task
 def ingest_campaigns():
     # Recupera tutte le campagne (attive e non)
     all_remote_campaign = {c for c in _get_all_campaigns(only_active=False) if c.schedule_type == "regular"}
@@ -124,18 +129,21 @@ def stats_refining(stats, available_groups: Iterable[str] = None):
 
     return reorganize(rawrefine(stats))
 
+@shared_task
+def ingest_analytics(start=None, end=None):
+    # 1. Fix crash se la tabella è vuota
+    if not start:
+        latest = models.Analytics.objects.order_by("-date").values("date").first()
+        start = latest.get("date") if latest else yesterday()
 
-def ingest_analytics(start:datetime.datetime = None, end:datetime.datetime = None):
-    start = start or models.Analytics.objects.order_by("-date").values("date").first().get("date", yesterday())
     end = end or yesterday()
+
+    remote_campaigns = ingest_campaigns()
+
     bulk_analytics = []
-    remote_campaigns = ingest_campaigns() ## ingest campaigns before analytics
-    exit(124)
 
     _logger.info(f"Starting to ingest analytics for {len(remote_campaigns)} campaigns")
     _logger.info(f"Analytics range: {start} - {end}")
-    _logger.info(f"Deleting existing analytics for {start} - {end}")
-    models.Analytics.objects.filter(date__gte=start, date__lte=end).delete()
 
     for c in remote_campaigns:
         stats = c.get_stats(start, end)
@@ -160,6 +168,12 @@ def ingest_analytics(start:datetime.datetime = None, end:datetime.datetime = Non
                 subscribed=values.get("subAdded",0),
                 unsubscribed=values.get("subRemoved",0),
             ))
+    if bulk_analytics:
+        with transaction.atomic():
+            _logger.info(f"Deleting existing analytics for {start} - {end}")
+            models.Analytics.objects.filter(date__gte=start, date__lte=end).delete()
 
-    _logger.info(f"Ingested {len(bulk_analytics)} analytics")
-    models.Analytics.objects.bulk_create(bulk_analytics, batch_size=100)
+            _logger.info(f"Ingested {len(bulk_analytics)} analytics")
+            models.Analytics.objects.bulk_create(bulk_analytics, batch_size=100)
+    else:
+        _logger.info("no analytics to ingest")

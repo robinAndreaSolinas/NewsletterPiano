@@ -11,6 +11,7 @@ services:
       POSTGRES_HOST: "postgres"
       REDIS_URL: 'redis://redis:6379/0'
     networks:
+      - default # to connect other services in same network es: db
       - proxynet
     labels:
       - "traefik.enable=true"
@@ -19,19 +20,22 @@ services:
       - "traefik.http.routers.web.entrypoints=https"
       - "traefik.http.routers.web.tls=true"
       - "traefik.http.services.web.loadbalancer.server.port=8000"
+    ports:
+      - "18080:8000"
 
     restart: unless-stopped
     volumes:
       - ./var/data/:/app/var/data/
       - ./ingestion/migrations/:/app/ingestion/migrations/
     depends_on:
-      db:
+      postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
 
-  db:
+  postgres:
     image: postgres
+    container_name: postgres_db
     environment:
       POSTGRES_DB: "postgres"
       POSTGRES_USER: "postgres"
@@ -47,6 +51,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    container_name: redis_cache_celery
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -54,9 +59,59 @@ services:
       timeout: 5s
       retries: 5
 
+## Celery configuration worker + beat
+
+  worker:
+    build: .
+    container_name: celery_worker
+    env_file: .env
+    environment:
+      DJANGO_DEBUG: "False"
+      POSTGRES_DB: "postgres"
+      POSTGRES_USER: "postgres"
+      POSTGRES_PASSWORD: "postgres"
+      POSTGRES_HOST: "postgres"
+      REDIS_URL: 'redis://redis:6379/0'
+    command:
+      - /bin/sh
+      - -c
+      - celery -A conf worker -l INFO
+    volumes:
+      - ./var/data/:/app/var/data/
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  beat:
+    build: .
+    env_file: .env
+    container_name: celery_beat
+    environment:
+      DJANGO_DEBUG: "False"
+      POSTGRES_DB: "postgres"
+      POSTGRES_USER: "postgres"
+      POSTGRES_PASSWORD: "postgres"
+      POSTGRES_HOST: "postgres"
+      REDIS_URL: 'redis://redis:6379/0'
+    command:
+      - /bin/sh
+      - -c
+      - celery -A conf beat -l INFO
+    volumes:
+      - ./var/data/:/app/var/data/
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      worker:
+        condition: service_started
+
 volumes:
   postgres_data:
 
 networks:
   proxynet:
-    external: true
+#    external: true

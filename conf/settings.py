@@ -51,7 +51,8 @@ INSTALLED_APPS = [
     *register_app(BASE_DIR),
     'rest_framework',
     'rest_framework.authtoken',
-    'drf_spectacular'
+    'drf_spectacular',
+    'django_celery_beat',
 ]
 
 MIDDLEWARE = [
@@ -155,7 +156,6 @@ if os.getenv("DB_IMAGE"):
 
 DATABASE_ROUTERS = ['conf.routers.ReadOnlyRouter']
 
-
 # Password validation
 # https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
 
@@ -184,7 +184,7 @@ TIME_ZONE = 'Europe/Rome'
 
 USE_I18N = True
 
-USE_TZ = False
+USE_TZ = True
 
 
 # Static files (CSS, JavaScript, Images)
@@ -249,3 +249,16 @@ LOGGING = {
 CSRF_TRUSTED_ORIGINS=(
 	*set(os.getenv('DJANGO_CSRF_TRUSTED_ORIGINS', '').split(',')) - {'', None},
 )
+
+# celery
+
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_ENABLE_UTC = True
+CELERY_CACHE_BACKEND = 'default'
+CELERY_BROKER_URL= os.getenv("REDIS_URL")
+
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+
+CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'
