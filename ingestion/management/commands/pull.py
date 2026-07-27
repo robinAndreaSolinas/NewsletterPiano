@@ -95,19 +95,6 @@ class Command(BaseCommand):
         )
         self.stdout.write(self.style.NOTICE(f"Task schedulato (id={task.id}), attendo il completamento..."))
 
-        result = self._wait_for_task(task)
-
         self.stdout.write(
-            self.style.SUCCESS(f"Task 'ingest_analytics' completato. Risultato: {result}")
+            self.style.SUCCESS(f"Task 'ingest_analytics' Scheduleator in Background.")
         )
-
-    def _wait_for_task(self, task):
-        """
-        Blocca l'esecuzione del comando finché il task Celery non termina
-        (con successo o con errore), e ne ritorna il risultato.
-        """
-        try:
-            # timeout=None => attende indefinitamente il completamento
-            return task.get(timeout=None)
-        except Exception as exc:
-            raise CommandError(f"Il task {task.id} ha fallito: {exc}")

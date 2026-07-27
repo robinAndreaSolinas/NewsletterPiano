@@ -2,9 +2,9 @@ from __future__ import annotations
 import datetime
 import functools
 import time
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import httpx
-from httpx import Client, HTTPStatusError, Timeout
+from httpx import Client, HTTPStatusError
 import logging
 from var.lib.utils import camel_to_snake, Singleton, APIClientInterface, APIException
 
@@ -48,11 +48,24 @@ class ESPAPIClient(APIClientInterface):
 
     ENDPOINT = "https://api-esp.piano.io"
 
-    def __init__(self, site_id: int, api_key: str, *, http_client=None, logger: logging.Logger = None):
+    def __init__(self, site_id: int, api_key: str, *, http_client: Optional[Client] = None, logger: logging.Logger = None):
         self.site_id = site_id
         self._api_key = api_key
+        # Se http_client viene passato usiamo quello, altrimenti creiamo un client dedicato
+        self._owns_client = http_client is None
         self._http_client = http_client or Client(base_url=self.ENDPOINT, timeout=10, params={"api_key": self._api_key})
         self._logger = logger or logging.getLogger(f"{__name__}.{self.__class__.__name__}")
+
+    def close(self):
+        """Chiude il client HTTP se è stato creato da questa istanza."""
+        if getattr(self, "_owns_client", False) and getattr(self, "_http_client", None):
+            self._http_client.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
 
     @timeout_backoff(max_retries=10, multiplier=2)
     def call_api(self, path: str, method: str = "GET", **kwargs) -> Dict[str, Any]:
@@ -62,16 +75,31 @@ class ESPAPIClient(APIClientInterface):
             logger.error(f"Invalid HTTP method: {method!r}")
             raise ValueError(f"Invalid HTTP method: {method!r}")
 
+        # Se il client principale è stato chiuso, usiamo un client temporaneo pulito
+        if getattr(self._http_client, "is_closed", False):
+            client_to_use = Client(
+                base_url=self.ENDPOINT,
+                timeout=10,
+                params={"api_key": self._api_key}
+            )
+            should_close = True
+        else:
+            client_to_use = self._http_client
+            should_close = False
+
         try:
-            response = self._http_client.request(method.upper(), f"{path}", **kwargs)
+            response = client_to_use.request(method.upper(), f"{path}", **kwargs)
             logger.info(f"API call: {method.upper()} {path} -> {response.status_code}")
             response.raise_for_status()
             return response.json()
         except HTTPStatusError as e:
             raise PianoESPException(e)
+        finally:
+            if should_close:
+                client_to_use.close()
 
     def __repr__(self):
-        return f"<{self.__class__.__name__}({' '.join(f'{k}={v!r}' for k, v in self.__dict__.items() if not k.startswith("_"))})>"
+        return f"<{self.__class__.__name__}({' '.join(f'{k}={v!r}' for k, v in self.__dict__.items() if not k.startswith('_'))})>"
 
 
 class ClientESP(ESPAPIClient):
@@ -82,7 +110,7 @@ class ClientESP(ESPAPIClient):
     def get_all_campaigns(self, only_active: bool = True, /) -> list[Campaign]:
         res = self.call_api(f"/publisher/list/{self.site_id}").get("lists", [])
         return [
-            Campaign.from_raw_response(raw, api_key=self._api_key)
+            Campaign.from_raw_response(raw, api_key=self._api_key, http_client=self._http_client)
             for raw in res
             if raw.get("Active") or not only_active
         ]
@@ -90,7 +118,7 @@ class ClientESP(ESPAPIClient):
     def get_all_mailing_lists(self, only_active: bool = True, /) -> list[MailingList]:
         res = self.call_api(f"/publisher/pub/{self.site_id}/sq")
         return [
-            MailingList.from_raw_response(raw, api_key=self._api_key)
+            MailingList.from_raw_response(raw, api_key=self._api_key, http_client=self._http_client)
             for raw in res
             if raw.get("Active") or not only_active
         ]
@@ -99,9 +127,8 @@ class ClientESP(ESPAPIClient):
         sq_ids = [ml.id] if isinstance(ml, MailingList) else [_.id for _ in ml]
         return self.call_api(f"/publisher/pub/{self.site_id}/sq/subscribers", method="POST", json={"sqIds": sq_ids})
 
-
     def __str__(self):
-            return f"<{self.__class__.__name__}(ID={self.site_id!r})>"
+        return f"<{self.__class__.__name__}(ID={self.site_id!r})>"
 
 
 class Campaign(Singleton, ESPAPIClient):
@@ -117,6 +144,7 @@ class Campaign(Singleton, ESPAPIClient):
                  api_key: str,
                  type: int = None,
                  stage: int = None,
+                 http_client: Optional[Client] = None,
                  **kwargs):
         self.id = id
         self.name = name.strip() if name else None
@@ -126,13 +154,17 @@ class Campaign(Singleton, ESPAPIClient):
         self.type = type
         self.stage = stage
 
-        ESPAPIClient.__init__(self, site_id, api_key)
+        ESPAPIClient.__init__(self, site_id, api_key, http_client=http_client)
 
     @classmethod
-    def from_raw_response(cls, response: dict, api_key: str):
+    def from_raw_response(cls, response: dict, api_key: str, http_client: Optional[Client] = None):
         norm = {camel_to_snake(k): v for k, v in response.items()}
         try:
-           return Campaign.get_instance(norm.get("id"))
+            instance = Campaign.get_instance(norm.get("id"))
+            # Se l'istanza esiste già, aggiorniamo il client HTTP per evitare che rimanga vecchio
+            if http_client:
+                instance._http_client = http_client
+            return instance
         except ValueError:
             return cls(
                 norm.pop("id"),
@@ -143,14 +175,15 @@ class Campaign(Singleton, ESPAPIClient):
                 site_id=norm.pop("publisher_id"),
                 api_key=api_key,
                 type=norm.pop("type"),
-                stage=norm.pop("stage")
+                stage=norm.pop("stage"),
+                http_client=http_client
             )
 
     def get_mailing_list(self):
         res = self.call_api(f"/publisher/pub/{self.site_id}/ml/{self.id}/sq")
 
         return [
-            MailingList.from_raw_response(m, api_key=self._api_key)
+            MailingList.from_raw_response(m, api_key=self._api_key, http_client=self._http_client)
             for m in res
         ]
 
@@ -169,7 +202,7 @@ class MailingList(Singleton, ESPAPIClient):
 
     def __init__(self,
                  id: int,
-                 name:str = None,
+                 name: str = None,
                  *,
                  active: bool = None,
                  internal_name: str = None,
@@ -177,6 +210,7 @@ class MailingList(Singleton, ESPAPIClient):
                  mailing_lists: list[int] = None,
                  site_id: int,
                  api_key: str,
+                 http_client: Optional[Client] = None,
                  **kwargs):
         self.id = id
         self.name = name
@@ -185,7 +219,7 @@ class MailingList(Singleton, ESPAPIClient):
         self.internal_name = internal_name.strip() if internal_name else None
         self.hide_on_sub_page = bool(hide_on_sub_page)
 
-        ESPAPIClient.__init__(self, site_id, api_key)
+        ESPAPIClient.__init__(self, site_id, api_key, http_client=http_client)
 
     @property
     def linked_campaigns(self):
@@ -199,10 +233,13 @@ class MailingList(Singleton, ESPAPIClient):
         return campaigns
 
     @classmethod
-    def from_raw_response(cls, response: dict, api_key: str):
+    def from_raw_response(cls, response: dict, api_key: str, http_client: Optional[Client] = None):
         norm = {camel_to_snake(k): v for k, v in response.items()}
         try:
-           return MailingList.get_instance(norm.get("id"))
+            instance = MailingList.get_instance(norm.get("id"))
+            if http_client:
+                instance._http_client = http_client
+            return instance
         except ValueError:
             return cls(
                 norm.pop("id"),
@@ -213,6 +250,7 @@ class MailingList(Singleton, ESPAPIClient):
                 mailing_lists=norm.pop("mailing_lists"),
                 site_id=norm.pop("publisher_id"),
                 api_key=api_key,
+                http_client=http_client
             )
 
     def get_stats(self, date_start: datetime.date, date_end: datetime.date = None):
@@ -222,7 +260,7 @@ class MailingList(Singleton, ESPAPIClient):
         return self.call_api(f"/stats/squads/full/{self.id}", params={"date_start": date_start, "date_end": date_end})
 
     def __repr__(self):
-        return f"<{self.__class__.__name__}({' '.join(f'{k}={v!r}' for k, v in self.__dict__.items() if not k.startswith("_"))})>"
+        return f"<{self.__class__.__name__}({' '.join(f'{k}={v!r}' for k, v in self.__dict__.items() if not k.startswith('_'))})>"
 
     def __str__(self):
         return f"<{self.__class__.__name__}(ID={self.id!r})>"
