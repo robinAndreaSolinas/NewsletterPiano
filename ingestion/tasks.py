@@ -17,7 +17,7 @@ logger = get_task_logger(__name__)
 __KEYS = json.loads(settings.SECRET_KEYS.read_text())
 _logger = logging.getLogger(__name__.split(".")[0])
 
-yesterday = lambda: timezone.now().date() - datetime.timedelta(days=1)
+yesterday = lambda: timezone.localdate() - datetime.timedelta(days=1)
 
 
 def _get_all_campaigns(only_active=True):
