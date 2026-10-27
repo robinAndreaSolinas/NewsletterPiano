@@ -34,3 +34,7 @@ logs/
 local/
 *.local*
 */migrations/[0-9]*
+
+*-dev
+*.dev*
+*-local*

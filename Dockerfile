@@ -1,17 +1,18 @@
-FROM python:3.12-alpine
+FROM python:3.14-alpine
 
 WORKDIR /app
 COPY . .
 
-RUN apk upgrade --no-cache \
-    && pip install --no-cache-dir -r requirements.txt \
-    && pip install --no-cache-dir gunicorn \
-    && chmod +x entrypoint manage.py \
+RUN apk upgrade --no-cache && \
+    pip install --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir gunicorn && \
+    chmod +x entrypoint manage.py && \
     # Cleaning
-    && find /usr/local/lib/python3.*/ -name '*.pyc' -delete \
-    && find /usr/local/lib/python3.*/ -name '__pycache__' -delete \
-    && rm -rf /usr/local/lib/python3.*/site-packages/pip \
-    && rm -rf /usr/local/lib/python3.*/site-packages/setuptools
+    find /usr/local/lib/python3.*/ -name '*.pyc' -delete && \
+    find /usr/local/lib/python3.*/ -name '__pycache__' -delete && \
+    rm -rf /usr/local/lib/python3.*/site-packages/pip && \
+    rm -rf /usr/local/lib/python3.*/site-packages/setuptools
 
 ENV HOST=0.0.0.0
 ENV PORT=8000
