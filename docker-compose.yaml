@@ -27,6 +27,7 @@ services:
     volumes:
       - ./var/data/:/app/var/data/
       - ./ingestion/migrations/:/app/ingestion/migrations/
+      - ./mailup/migrations/:/app/mailup/migrations/
     depends_on:
       postgres:
         condition: service_healthy

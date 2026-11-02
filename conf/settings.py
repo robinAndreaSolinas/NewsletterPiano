@@ -197,6 +197,19 @@ STATIC_ROOT = DATA_DIR / 'static/'
 SECRET_KEYS = (DATA_DIR / "secrets.json")
 SECRET_KEYS.touch(mode=0o600, exist_ok=True)
 
+# MailUp: env values win, missing ones are read from the "mailup" key of secrets.json.
+# List IDs and site labels are discovered from the MailUp console; they are not configured here.
+MAILUP = {
+    "CLIENT_ID": os.getenv("MAILUP_CLIENT_ID"),
+    "CLIENT_SECRET": os.getenv("MAILUP_CLIENT_SECRET"),
+    # Optional: MailUp OAuth does not support client_credentials. If the console user is
+    # present it is used as password grant. See var/lib/mailup.py.
+    "USERNAME": os.getenv("MAILUP_USERNAME"),
+    "PASSWORD": os.getenv("MAILUP_PASSWORD"),
+    # Issued by the one-time OAuth authorization (LogOn). Password grant alone is not authorized on this account.
+    "REFRESH_TOKEN": os.getenv("MAILUP_REFRESH_TOKEN"),
+}
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,

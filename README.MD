@@ -48,6 +48,37 @@ Il `site_id` numerico viene tradotto in stringa leggibile (`594 -> "gio"`, `595 
 
 ---
 
+## MailUp (`mailup`)
+
+Stesso backend, stesso JSON: le liste MailUp (quotidiano.net) finiscono su `/api/campaign` e `/api/stats` accanto a Piano, con il campo `source` (`piano` | `mailup`). Liste e site si scoprono da soli (nome lista → `qn`/`naz`/`rdc`/`gio`/`lux`). Il range di default è quello di Piano: dall'ultima data già in database a ieri.
+
+Il client HTTP è in `var/lib/mailup.py`. MailUp OAuth **non** supporta `client_credentials`: client id/secret identificano l'applicazione, l'account si autentica con utente console (`mXXXXX`) e password. Il client prova comunque `client_credentials` e, se il server lo rifiuta, usa il password grant.
+
+| Metrica | Fonte MailUp |
+|---|---|
+| sent / opened / clicked | `MailStatisticsService` `Message/{id}/Count/SendingRecipients, Views, Clicks`, sommate per giorno di invio (Europe/Rome) |
+| subscribed / unsubscribed | `Console/List/{id}/Recipients/EmailOptins` filtrato per `Optin_Date` / `Optout_Date` del giorno |
+| total_users / total_active_users | iscritti + disiscritti / iscritti della lista |
+
+Configurazione (`.env`, oppure chiave `"mailup"` in `var/data/secrets.json`):
+
+```shell
+MAILUP_CLIENT_ID=...        # Impostazioni > Impostazioni account > Developer's corner > Codici API
+MAILUP_CLIENT_SECRET=...
+MAILUP_USERNAME=m12345      # utente della console (Settings > Users). MailUp lo richiede.
+MAILUP_PASSWORD=...
+```
+
+```shell
+./manage.py mailup check                                     # verifica credenziali ed elenca le liste scoperte
+./manage.py mailup analytics -s 20261001 -e 20261031 --sync  # import nel processo corrente
+./manage.py mailup analytics                                 # via Celery, dall'ultima data importata a ieri
+```
+
+Periodic Task Celery: `mailup.tasks.ingest_analytics`. Filtro opzionale: `GET /api/stats?source=mailup`.
+
+---
+
 ## `var/lib` — utilità condivise
 
 **`pianoESP.py`** è il client HTTP per l'API Piano. `ClientESP` è il punto di ingresso (get campaigns, mailing lists, subscribers). `Campaign` e `MailingList` estendono sia `ESPAPIClient` sia `Singleton` — due oggetti con lo stesso ID sono lo stesso oggetto in memoria, evita di instanziare duplicati durante l'ingestione. Il decorator `@timeout_backoff` riprova automaticamente in caso di timeout aumentando il valore ad ogni tentativo.
