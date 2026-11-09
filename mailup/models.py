@@ -62,6 +62,8 @@ class Analytics(models.Model):
     bounced = models.BigIntegerField(default=0)
     subscribed = models.BigIntegerField(default=0)
     unsubscribed = models.BigIntegerField(default=0)
+    # Not part of the public API. Which endpoint produced the numbers.
+    provenance = models.TextField(blank=True, default="")
     fetched_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -78,3 +80,26 @@ class Analytics(models.Model):
 
     def __repr__(self):
         return f"<{self.__class__.__name__}(mailing_list={self.mailing_list}, date={self.date}, sent={self.sent}, opened={self.opened}, clicked={self.clicked}, subscribed={self.subscribed}, unsubscribed={self.unsubscribed})>"
+
+
+class MetricSnapshot(models.Model):
+    """Lifetime MailUp counts observed on `captured_on`. Not a daily statistic.
+
+    The daily row is the difference between two snapshots. The first snapshot
+    has no difference and must not be copied into Analytics.
+    """
+    mailing_list = models.ForeignKey(MailingList, on_delete=models.CASCADE, related_name="snapshots")
+    message_id = models.IntegerField()
+    captured_on = models.DateField()
+    sent = models.BigIntegerField(default=0)
+    delivered = models.BigIntegerField(default=0)
+    opened = models.BigIntegerField(default=0)
+    clicked = models.BigIntegerField(default=0)
+    bounced = models.BigIntegerField(default=0)
+    unsubscribed = models.BigIntegerField(default=0)
+
+    class Meta:
+        unique_together = ("mailing_list", "message_id", "captured_on")
+        indexes = [
+            models.Index(fields=["mailing_list", "message_id", "captured_on"]),
+        ]

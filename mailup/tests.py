@@ -1,11 +1,16 @@
 import base64
 import datetime
+import json
+import os
 import re
+import unittest
 from io import StringIO
+from pathlib import Path
 from unittest.mock import patch
 from urllib.parse import parse_qs
 
 import httpx
+import pytest
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.management import call_command, CommandError
@@ -14,7 +19,7 @@ from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
 
 from ingestion.models import Analytics as PianoAnalytics, Campaign as PianoCampaign
-from mailup import models, tasks
+from mailup import aggregate, models, tasks
 from var.lib.mailup import MailUpClient, MailUpException, MailUpAuthException, parse_date, format_filter_date
 
 UTC = datetime.timezone.utc
@@ -29,9 +34,11 @@ class FakeMailUp:
             {"idList": 2, "Name": "QN Sera", "Description": "", "listGuid": "g-2", "Company": ""},
             {"idList": 3, "Name": "La Nazione interne", "Description": "", "listGuid": "g-3", "Company": ""},
         ]
+        # (message_id, StartDate, Recipient) — Recipient is the per-dispatch count, not a lifetime total
         self.history = {
-            1: [(101, "2026-10-30 05:00:00Z"), (102, "2026-10-31 05:00:00Z"), (103, "2026-10-31 23:30:00Z")],
-            2: [(201, "2026-10-30 17:00:00Z")],
+            1: [(101, "2026-10-30 05:00:00Z", 1000), (102, "2026-10-31 05:00:00Z", 1010),
+                (103, "2026-10-31 23:30:00Z", 1020)],
+            2: [(201, "2026-10-30 17:00:00Z", 500)],
         }
         self.subjects = {101: "Mattina 30", 102: "Mattina 31", 103: "Mattina 1 nov", 201: "Sera 30"}
         self.stats = {
@@ -49,6 +56,7 @@ class FakeMailUp:
         self.page_size_limit = None
         self.reject_orderby = False
         self.fail_lists = set()
+        self.status_once = {}
         self.token_counter = 0
         self.expired_tokens = set()
         self.refuse_client_credentials = False
@@ -101,6 +109,11 @@ class FakeMailUp:
         if not auth.startswith("Bearer ") or auth[7:] in self.expired_tokens:
             return httpx.Response(401, json={"error": "unauthorized"})
 
+        for key, code in list(self.status_once.items()):
+            if key in path:
+                del self.status_once[key]
+                return httpx.Response(code, text="retry-me")
+
         console = "/API/v1.1/Rest/ConsoleService.svc/Console"
         stats = "/API/v1.1/Rest/MailStatisticsService.svc"
 
@@ -110,18 +123,22 @@ class FakeMailUp:
         if m := re.fullmatch(rf"{console}/List/(\d+)/Emails/SendHistory", path):
             list_id = int(m.group(1))
             if list_id in self.fail_lists:
-                return httpx.Response(500, text="boom")
+                return httpx.Response(500, text="subscriber@example.com")
             if self.reject_orderby and "orderby" in params:
                 return httpx.Response(400, text="orderby not supported")
-            items = [{"idMessage": mid, "StartDate": d, "EndDate": d, "Recipient": 0, "Sender": "", "Tags": ""}
-                     for mid, d in self.history.get(list_id, [])]
+            items = [{"idMessage": mid, "StartDate": d, "EndDate": d, "Recipient": n, "Sender": "", "Tags": ""}
+                     for mid, d, n in self.history.get(list_id, [])]
             reverse = params.get("orderby") == "StartDate desc"
             items.sort(key=lambda i: i["StartDate"], reverse=reverse)
             return httpx.Response(200, json=self._page(items, params))
 
         if m := re.fullmatch(rf"{console}/List/(\d+)/Emails", path):
-            message_id = int(params["filterby"].split("==")[1])
-            items = [{"idMessage": message_id, "Subject": self.subjects.get(message_id, ""), "idList": int(m.group(1))}]
+            list_id = int(m.group(1))
+            ids = [row[0] for row in self.history.get(list_id, [])]
+            if "filterby" in params:
+                ids = [int(params["filterby"].split("==")[1])]
+            items = [{"idMessage": message_id, "Subject": self.subjects.get(message_id, ""), "idList": list_id}
+                     for message_id in ids]
             return httpx.Response(200, json=self._page(items, params))
 
         if m := re.fullmatch(rf"{console}/List/(\d+)/Recipients/EmailOptins", path):
@@ -240,8 +257,65 @@ class MailUpClientTest(SimpleTestCase):
 
     def test_http_error(self):
         self.fake.fail_lists.add(1)
-        with self.assertRaises(MailUpException):
+        with self.assertRaises(MailUpException) as caught:
             self.fake.client().get_send_history(1)
+        self.assertNotIn("subscriber@example.com", str(caught.exception))
+        self.assertIn("500", str(caught.exception))
+
+    def test_retries_rate_limit_then_reads(self):
+        self.fake.status_once["/User/Lists"] = 429
+        self.assertEqual(len(self.fake.client().get_lists()), 3)
+
+    def test_empty_page(self):
+        self.fake.lists = []
+        self.assertEqual(self.fake.client().get_lists(), [])
+
+    def test_malformed_count_is_not_zero(self):
+        self.fake.stats[101]["Views"] = {"unexpected": True}
+        with self.assertRaises(MailUpException):
+            self.fake.client().get_message_stats(101)
+
+    def test_missing_total_is_not_zero(self):
+        payload = json.loads(Path(__file__).with_name("fixtures").joinpath("malformed_pages.json").read_text())
+
+        def handler(request):
+            if request.url.path.endswith("/Token"):
+                return httpx.Response(200, json={"access_token": "t", "expires_in": 900, "refresh_token": "r"})
+            return httpx.Response(200, json=payload["missing_total"])
+
+        client = MailUpClient("cid", "csecret", http_client=httpx.Client(
+            base_url=MailUpClient.ENDPOINT, transport=httpx.MockTransport(handler)))
+        client._token_store.set({"access_token": "t", "expires_at": 10**12})
+        with self.assertRaises(MailUpException):
+            client.count_optins(1, datetime.datetime(2026, 11, 1, tzinfo=UTC), datetime.datetime(2026, 11, 2, tzinfo=UTC))
+
+    def test_recorded_send_history_fixture(self):
+        page = json.loads(
+            Path(__file__).with_name("fixtures").joinpath("qnmedia_send_history_2026-11-02.json").read_text()
+        )
+        calls = {"n": 0}
+
+        def handler(request):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                first = dict(page)
+                first["Items"] = page["Items"][:2]
+                first["PageSize"] = 2
+                return httpx.Response(200, json=first)
+            rest = dict(page)
+            rest["Items"] = page["Items"][2:]
+            rest["PageNumber"] = 1
+            rest["PageSize"] = 2
+            return httpx.Response(200, json=rest)
+
+        client = MailUpClient("cid", "csecret", http_client=httpx.Client(
+            base_url=MailUpClient.ENDPOINT, transport=httpx.MockTransport(handler)))
+        client._token_store.set({"access_token": "t", "expires_at": 10**12})
+        history = client.get_send_history(18)
+        self.assertEqual(len(history), len(page["Items"]))
+        day = datetime.date(2026, 10, 26)
+        of_1390 = [item for item in history if item["idMessage"] == 1390 and aggregate.local_day(item["StartDate"]) == day]
+        self.assertEqual(aggregate.sum_sent_on(of_1390, day), 3)
 
 
 @override_settings(
@@ -278,59 +352,152 @@ class IngestionTest(TestCase):
         self.assertEqual((qn.name, qn.active, qn.site), ("QN Mattina nuova", True, "qn"))
         self.assertFalse(models.MailingList.objects.get(list_id=3).active)
 
-    def test_ingest_analytics(self):
-        result = tasks.ingest_analytics("20261030", "20261101")
-        self.assertEqual(result["lists"], 3)
-        self.assertEqual(result["messages"], 4)
-        self.assertEqual(result["analytics"], 9)
+    def test_first_close_does_not_store_lifetime_as_a_day(self):
+        result = tasks.ingest_analytics(end="20261030")
+        self.assertEqual(result["date"], "2026-10-30")
+        self.assertIn(1, result["skipped"])
+        self.assertFalse(models.Analytics.objects.exists())
+        self.assertEqual(models.MetricSnapshot.objects.filter(mailing_list__list_id=1).count(), 3)
+        self.assertEqual(models.Message.objects.get(message_id=101).sent, 1000)
 
-        mattina = {a.date: a for a in models.Analytics.objects.filter(mailing_list__list_id=1)}
-        d30, d31, n1 = datetime.date(2026, 10, 30), datetime.date(2026, 10, 31), datetime.date(2026, 11, 1)
-        self.assertEqual(set(mattina), {d30, d31, n1})
+    def test_second_close_is_the_delta_not_the_lifetime(self):
+        tasks.ingest_analytics(end="20261030")
+        self.fake.stats[101]["Views"] = 407
+        self.fake.stats[101]["Clicks"] = 55
+        self.fake.stats[101]["Bounces"] = 12
+        result = tasks.ingest_analytics(end="20261031")
+        self.assertEqual(result["closed"], [1, 2])
+        self.assertIn(3, result["skipped"])
 
-        self.assertEqual((mattina[d30].sent, mattina[d30].opened, mattina[d30].clicked), (1000, 400, 50))
-        self.assertEqual((mattina[d31].sent, mattina[n1].sent), (1010, 1020))
-        self.assertEqual([mattina[d].subscribed for d in (d30, d31, n1)], [2, 1, 1])
-        self.assertEqual([mattina[d].unsubscribed for d in (d30, d31, n1)], [0, 1, 0])
+        row = models.Analytics.objects.get(mailing_list__list_id=1, date="2026-10-31")
+        self.assertEqual((row.sent, row.opened, row.clicked, row.bounced), (1010, 7, 5, 2))
+        self.assertEqual(row.delivered, 1010 - 2)
+        self.assertEqual((row.subscribed, row.unsubscribed), (1, 1))
+        self.assertIn("SendHistory.Recipient", row.provenance)
+        self.assertFalse(models.Analytics.objects.filter(date="2026-10-30").exists())
 
-        message = models.Message.objects.get(message_id=103)
-        self.assertEqual((message.subject, message.mailing_list.list_id, message.delivered), ("Mattina 1 nov", 1, 1015))
+        sera = models.Analytics.objects.get(mailing_list__list_id=2, date="2026-10-31")
+        self.assertEqual((sera.sent, sera.opened), (0, 0))
 
     def test_ingest_is_idempotent(self):
-        tasks.ingest_analytics("20261030", "20261101")
+        tasks.ingest_analytics(end="20261030")
         self.fake.stats[101]["Views"] = 450
-        tasks.ingest_analytics("20261030", "20261101")
-        self.assertEqual(models.Analytics.objects.count(), 9)
-        self.assertEqual(models.Message.objects.count(), 4)
-        self.assertEqual(models.Analytics.objects.get(mailing_list__list_id=1, date="2026-10-30").opened, 450)
+        tasks.ingest_analytics(end="20261031")
+        tasks.ingest_analytics(end="20261031")
+        self.assertEqual(models.Analytics.objects.filter(mailing_list__list_id=1, date="2026-10-31").count(), 1)
+        self.assertEqual(models.Analytics.objects.get(mailing_list__list_id=1, date="2026-10-31").opened, 50)
         self.assertEqual(models.Message.objects.get(message_id=101).opened, 450)
+        self.assertEqual(models.MetricSnapshot.objects.filter(message_id=101, captured_on="2026-10-31").count(), 1)
 
-    def test_failed_list_keeps_existing_data(self):
-        tasks.ingest_analytics("20261030", "20261101")
-        self.fake.fail_lists.add(2)
-        result = tasks.ingest_analytics("20261030", "20261101")
-        self.assertEqual(result["failed_lists"], 1)
-        self.assertEqual(models.Analytics.objects.filter(mailing_list__list_id=2).count(), 3)
+    def test_failed_fetch_does_not_write_zeros(self):
+        tasks.ingest_lists()
+        ml = models.MailingList.objects.get(list_id=1)
+        kept = models.Analytics.objects.create(
+            mailing_list=ml, date=datetime.date(2026, 11, 1),
+            sent=6, opened=1, clicked=0, subscribed=6, unsubscribed=7,
+        )
+        self.fake.fail_lists.add(1)
+        result = tasks.ingest_analytics(end="20261031")
+        self.assertIn(1, result["failed"])
+        kept.refresh_from_db()
+        self.assertEqual((kept.sent, kept.subscribed, kept.unsubscribed), (6, 6, 7))
+        self.assertFalse(models.Analytics.objects.filter(mailing_list=ml, date="2026-10-31").exists())
+
+    def test_decreasing_cumulative_does_not_go_negative(self):
+        tasks.ingest_analytics(end="20261030")
+        self.fake.stats[102]["Views"] = 100
+        tasks.ingest_analytics(end="20261031")
+        row = models.Analytics.objects.get(mailing_list__list_id=1, date="2026-10-31")
+        self.assertEqual(row.opened, 0)
+        self.assertGreaterEqual(row.opened, 0)
+        self.assertIn("clamped to 0", row.provenance)
+
+    def test_opens_after_the_send_stay_on_the_observation_day(self):
+        tasks.ingest_analytics(end="20261030")
+        self.fake.stats[101]["Views"] = 1868
+        self.fake.stats[101]["Clicks"] = 1850
+        tasks.ingest_analytics(end="20261031")
+        row = models.Analytics.objects.get(mailing_list__list_id=1, date="2026-10-31")
+        self.assertEqual(row.sent, 1010)
+        self.assertEqual((row.opened, row.clicked), (1468, 1800))
+        self.assertGreater(row.clicked, row.opened)
+        self.assertLessEqual(row.delivered, row.sent)
+
+    def test_screenshot_totals_are_not_written_on_one_day(self):
+        tasks.ingest_lists()
+        ml = models.MailingList.objects.get(list_id=1)
+        models.Analytics.objects.create(
+            mailing_list=ml, date=datetime.date(2026, 11, 1), sent=0, subscribed=6, unsubscribed=7,
+        )
+        models.Analytics.objects.create(
+            mailing_list=ml, date=datetime.date(2026, 11, 2), sent=0, subscribed=7, unsubscribed=0,
+        )
+        models.Analytics.objects.create(
+            mailing_list=ml, date=datetime.date(2026, 11, 3), sent=0, subscribed=9, unsubscribed=3,
+        )
+        self.fake.history[1] = [(1390, "2026-11-04 05:01:00Z", 71211)]
+        self.fake.subjects[1390] = "Prima dell'Alba"
+        self.fake.stats[1390] = dict(
+            SendingRecipients=356662, Recipients=356662, Views=14977, Clicks=782, Bounces=12936, Unsubscriptions=0,
+        )
+        tasks.ingest_analytics(end="20261104")
+        self.assertFalse(models.Analytics.objects.filter(date="2026-11-04").exists())
+        for day, subscribed, unsubscribed in (
+            (datetime.date(2026, 11, 1), 6, 7),
+            (datetime.date(2026, 11, 2), 7, 0),
+            (datetime.date(2026, 11, 3), 9, 3),
+        ):
+            row = models.Analytics.objects.get(mailing_list=ml, date=day)
+            self.assertEqual((row.sent, row.subscribed, row.unsubscribed), (0, subscribed, unsubscribed))
+        self.assertFalse(models.Analytics.objects.filter(sent=356662).exists())
 
     @patch.object(tasks, "yesterday", return_value=datetime.date(2026, 11, 1))
-    def test_default_range_starts_from_last_stored_day(self, _):
-        tasks.ingest_analytics("20261031", "20261031")
+    def test_default_closes_yesterday_only(self, _):
+        tasks.ingest_lists()
+        ml = models.MailingList.objects.get(list_id=1)
+        models.Analytics.objects.create(
+            mailing_list=ml, date=datetime.date(2026, 10, 30), sent=6, subscribed=6, unsubscribed=7,
+        )
         result = tasks.ingest_analytics()
-        self.assertEqual((result["start"], result["end"]), ("2026-10-31", "2026-11-01"))
+        self.assertEqual(result["date"], "2026-11-01")
+        kept = models.Analytics.objects.get(mailing_list=ml, date="2026-10-30")
+        self.assertEqual((kept.sent, kept.subscribed, kept.unsubscribed), (6, 6, 7))
+        self.assertFalse(models.Analytics.objects.filter(date="2026-11-01").exists())
 
-    def test_invalid_range(self):
-        with self.assertRaises(ValueError):
-            tasks.ingest_analytics("20261102", "20261101")
+    def test_start_is_ignored_and_does_not_raise(self):
+        result = tasks.ingest_analytics("20261102", "20261101")
+        self.assertEqual(result["date"], "2026-11-01")
 
     def test_command(self):
         out = StringIO()
         with patch("mailup.management.commands.mailup.get_client", side_effect=lambda: self.fake.client()):
             call_command("mailup", "check", stdout=out)
-        self.assertIn("3 liste visibili", out.getvalue())
-        self.assertIn("QN Sera", out.getvalue())
+            self.assertIn("3 liste visibili", out.getvalue())
+            self.assertIn("QN Sera", out.getvalue())
 
-        call_command("mailup", "analytics", "--start", "20261030", "--end", "20261031", "--sync", stdout=out)
-        self.assertEqual(models.Analytics.objects.count(), 6)
+            call_command("mailup", "analytics", "--start", "20261030", "--end", "20261031", "--sync", stdout=out)
+            self.assertFalse(models.Analytics.objects.filter(date="2026-10-30").exists())
+
+            ml = models.MailingList.objects.get(list_id=1)
+            wrong = models.Analytics.objects.create(
+                mailing_list=ml, date=datetime.date(2026, 10, 30),
+                sent=356662, delivered=356662, opened=14977, clicked=782, bounced=12936,
+                subscribed=401002, unsubscribed=365431,
+            )
+            call_command("mailup", "backfill", "--start", "20261030", "--end", "20261031", stdout=out)
+            wrong.refresh_from_db()
+            self.assertEqual(wrong.sent, 356662)
+            self.assertEqual(wrong.subscribed, 401002)
+            self.assertIn("DRY-RUN", out.getvalue())
+            self.assertIn("sent_da_storico=1000", out.getvalue())
+            self.assertFalse(models.Analytics.objects.filter(date="2026-10-31").exists())
+
+            call_command("mailup", "backfill", "--start", "20261030", "--end", "20261031", "--apply", stdout=out)
+            wrong.refresh_from_db()
+            self.assertEqual(wrong.sent, 1000)
+            self.assertEqual(wrong.delivered, 356662)
+            self.assertEqual((wrong.opened, wrong.subscribed, wrong.unsubscribed), (14977, 401002, 365431))
+            self.assertFalse(models.Analytics.objects.filter(date="2026-10-31").exists())
 
         with self.assertRaises(CommandError):
             call_command("mailup", "analytics", "--start", "2026-13-01", "--sync", stdout=out)
@@ -399,3 +566,127 @@ class ApiTest(TestCase):
         self.assertEqual(self.api.get("/api/campaign/1").json()["source"], "mailup")
         self.assertEqual(self.api.get("/api/campaign/557").json()["source"], "piano")
         self.assertEqual(self.api.get("/api/mailup/stats").status_code, 404)
+
+    def test_contract_shape_and_types(self):
+        stats = self.api.get("/api/stats").json()
+        self.assertEqual(set(stats), {"count", "next", "previous", "results"})
+        self.assertIsInstance(stats["count"], int)
+        row = stats["results"][0]
+        self.assertEqual(set(row), {
+            "campaign", "date", "site", "source", "sent", "opened", "clicked", "subscribed", "unsubscribed",
+        })
+        for key in ("sent", "opened", "clicked", "subscribed", "unsubscribed"):
+            self.assertIsInstance(row[key], int)
+        self.assertIsInstance(row["campaign"], str)
+        self.assertIn(row["source"], ("piano", "mailup"))
+        self.assertNotIn("provenance", row)
+        self.assertNotIn("delivered", row)
+        self.assertNotIn("bounced", row)
+
+        by_date = self.api.get("/api/stats/20261030?to_date=20261031").json()
+        self.assertIsInstance(by_date, list)
+        self.assertTrue(by_date)
+        self.assertEqual(set(by_date[0]), set(row))
+
+        campaign = self.api.get("/api/campaign").json()
+        self.assertEqual(set(campaign), {"count", "next", "previous", "results"})
+        item = campaign["results"][0]
+        self.assertEqual(set(item), {
+            "campaign_id", "name", "site", "source", "active", "schedule_type",
+            "mailing_list_id", "total_users", "total_active_users", "fetched_at",
+        })
+        self.assertIsInstance(item["campaign_id"], int)
+        self.assertIsInstance(item["active"], bool)
+        self.assertEqual(self.api.get("/api/stats").status_code, 200)
+        self.assertEqual(self.api.get("/api/campaign/99999").status_code, 404)
+
+
+class AggregateTest(SimpleTestCase):
+
+    def test_empty_day_is_zero_and_missing_recipient_is_unknown(self):
+        day = datetime.date(2026, 11, 6)
+        self.assertEqual(aggregate.sum_sent_on([], day), 0)
+        moment = datetime.datetime(2026, 11, 6, 5, 1, tzinfo=UTC)
+        self.assertIsNone(aggregate.sum_sent_on([{"StartDate": moment}], day))
+        self.assertEqual(aggregate.sum_sent_on([{"StartDate": moment, "Recipient": 0}], day), 0)
+
+    def test_first_snapshot_is_not_a_day(self):
+        self.assertIsNone(aggregate.delta_counts({"opened": 1868, "clicked": 1850, "bounced": 0}, None))
+
+    def test_normal_delta_and_decrease_and_repeat(self):
+        previous = {"opened": 100, "clicked": 10, "bounced": 4}
+        current = {"opened": 110, "clicked": 10, "bounced": 1}
+        first = aggregate.delta_counts(current, previous)
+        second = aggregate.delta_counts(current, previous)
+        self.assertEqual(first, second)
+        self.assertEqual((first["opened"], first["clicked"], first["bounced"]), (10, 0, 0))
+        self.assertEqual(first["dropped"], {"bounced": -3})
+
+    def test_fourteen_sends_are_not_multiplied_into_one_day(self):
+        sends = []
+        for offset in range(14):
+            moment = datetime.datetime(2026, 10, 24, 5, 1, tzinfo=UTC) + datetime.timedelta(days=offset)
+            sends.append({"StartDate": moment, "idMessage": 1390, "Recipient": 71211})
+        day = datetime.date(2026, 11, 6)
+        self.assertEqual(aggregate.sum_sent_on(sends, day), 71211)
+        self.assertNotEqual(aggregate.sum_sent_on(sends, day), 14 * 71211)
+        self.assertIsNone(aggregate.delta_counts({"opened": 1868, "clicked": 1850, "bounced": 264}, None))
+
+    def test_delivered_never_exceeds_sent(self):
+        self.assertEqual(aggregate.delivered_for(71211, 264), 71211 - 264)
+        self.assertEqual(aggregate.delivered_for(10, 25), 0)
+        self.assertLessEqual(aggregate.delivered_for(10, 25), 10)
+
+    def test_month_and_year_boundary(self):
+        start, end = aggregate.day_bounds(datetime.date(2026, 12, 31))
+        self.assertEqual(start.date(), datetime.date(2026, 12, 31))
+        self.assertEqual(end.year, 2027)
+        self.assertEqual(end.month, 1)
+        self.assertEqual(end.day, 1)
+        self.assertEqual(aggregate.local_day(datetime.datetime(2026, 12, 31, 23, 30, tzinfo=UTC)), datetime.date(2027, 1, 1))
+
+    def test_dst(self):
+        spring_start, spring_end = aggregate.day_bounds(datetime.date(2026, 3, 29))
+        autumn_start, autumn_end = aggregate.day_bounds(datetime.date(2026, 10, 25))
+        # Same-tzinfo subtraction ignores the offset change; compare UTC instants.
+        self.assertEqual(int(spring_end.timestamp() - spring_start.timestamp()), 23 * 3600)
+        self.assertEqual(int(autumn_end.timestamp() - autumn_start.timestamp()), 25 * 3600)
+        late = datetime.datetime(2026, 10, 31, 23, 30, tzinfo=UTC)
+        self.assertEqual(aggregate.local_day(late), datetime.date(2026, 11, 1))
+
+
+@pytest.mark.mailup_live
+@unittest.skipUnless(os.environ.get("MAILUP_LIVE") == "1", "set MAILUP_LIVE=1 to call the real MailUp API")
+class LiveMailUpTest(SimpleTestCase):
+    def test_message_1390_matches_the_platform_or_explains(self):
+        evidence = Path("/tmp/mailup_live_evidence")
+        evidence.mkdir(exist_ok=True)
+        with tasks.get_client() as client:
+            counts = client.get_message_stats(1390)
+            page = client.call_api(
+                f"{client.CONSOLE}/Console/List/18/Email/1390/SendHistory",
+                params={"pageSize": 50, "pageNumber": 0},
+            )
+        redacted = _redact(page)
+        (evidence / "message_1390.json").write_text(json.dumps({"counts": counts, "send_history": redacted}, indent=2))
+        items = (page or {}).get("Items") or []
+        self.assertEqual((page or {}).get("TotalElementsCount"), 14)
+        latest = max(items, key=lambda item: item.get("StartDate") or "")
+        recipients = latest.get("Recipients", latest.get("Recipient"))
+        self.assertEqual(recipients, 71211)
+        self.assertEqual(counts["opened"], 1868)
+        self.assertEqual(counts["clicked"], 1850)
+
+
+def _redact(value):
+    if isinstance(value, dict):
+        out = {}
+        for key, item in value.items():
+            if "email" in key.lower() or "mail" == key.lower():
+                out[key] = "[redacted]"
+            else:
+                out[key] = _redact(item)
+        return out
+    if isinstance(value, list):
+        return [_redact(item) for item in value]
+    return value

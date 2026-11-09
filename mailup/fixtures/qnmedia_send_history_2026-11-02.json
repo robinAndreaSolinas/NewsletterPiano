@@ -1,0 +1,18 @@
+{
+  "_source": "Read-only capture on 2026-11-02 of GET /API/v1.1/Rest/ConsoleService.svc/Console/List/18/Emails/SendHistory?orderby=StartDate desc. The live TotalElementsCount was 184503; this file keeps a slice and sets TotalElementsCount to that slice so a client stops. No recipient address was in this resource. Sender is the newsletter display name.",
+  "IsPaginated": true,
+  "PageNumber": 0,
+  "PageSize": 20,
+  "TotalElementsCount": 9,
+  "Items": [
+    {"idMessage": 1399, "StartDate": "2026-10-30 17:12:16Z", "EndDate": "2026-10-30 17:14:11Z", "Recipient": 49, "Sender": "Direttrice QN", "Tags": ""},
+    {"idMessage": 1392, "StartDate": "2026-10-30 16:58:55Z", "EndDate": "2026-10-30 16:58:59Z", "Recipient": 1, "Sender": "QN Distretti", "Tags": ""},
+    {"idMessage": 1399, "StartDate": "2026-10-30 13:28:58Z", "EndDate": "2026-10-30 13:29:06Z", "Recipient": 1, "Sender": "QN Distretti", "Tags": ""},
+    {"idMessage": 1392, "StartDate": "2026-10-29 16:34:11Z", "EndDate": "2026-10-29 16:36:25Z", "Recipient": 38, "Sender": "La Nazione", "Tags": ""},
+    {"idMessage": 1391, "StartDate": "2026-10-29 11:43:17Z", "EndDate": "2026-10-29 11:45:43Z", "Recipient": 35, "Sender": "Direttrice QN", "Tags": ""},
+    {"idMessage": 1390, "StartDate": "2026-10-26 06:01:08Z", "EndDate": "2026-10-26 06:02:05Z", "Recipient": 3, "Sender": "QN Media", "Tags": ""},
+    {"idMessage": 1390, "StartDate": "2026-10-25 06:01:09Z", "EndDate": "2026-10-25 06:02:07Z", "Recipient": 3, "Sender": "QN Media", "Tags": ""},
+    {"idMessage": 1390, "StartDate": "2026-10-24 05:01:05Z", "EndDate": "2026-10-24 05:02:02Z", "Recipient": 3, "Sender": "QN Media", "Tags": ""},
+    {"idMessage": 1392, "StartDate": "2026-10-23 16:43:07Z", "EndDate": "2026-10-23 17:07:49Z", "Recipient": 861, "Sender": "La Nazione", "Tags": ""}
+  ]
+}

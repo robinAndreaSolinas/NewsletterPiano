@@ -1,0 +1,6 @@
+{
+  "empty": {"IsPaginated": true, "Items": [], "PageNumber": 0, "PageSize": 20, "TotalElementsCount": 0},
+  "missing_total": {"IsPaginated": true, "Items": [], "PageNumber": 0, "PageSize": 20},
+  "not_json": "not-json",
+  "count_not_integer": {"unexpected": true}
+}

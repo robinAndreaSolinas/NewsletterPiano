@@ -101,6 +101,7 @@ class MailUpClient(APIClientInterface):
         self._username = username
         self._password = password
         self._refresh_token = refresh_token
+        self._retry_sleep = 0
         self._owns_client = http_client is None
         self._http_client = http_client or Client(base_url=self.ENDPOINT, timeout=30)
         self._token_store = token_store or MemoryTokenStore()
@@ -192,20 +193,32 @@ class MailUpClient(APIClientInterface):
             raise ValueError(f"Invalid HTTP method: {method!r}")
 
         response = None
-        for attempt in range(2):
-            headers = {"Authorization": f"Bearer {self._access_token()}", "Accept": "application/json"}
-            response = self._http_client.request(method.upper(), path, headers=headers, **kwargs)
-            self._logger.info(f"API call: {method.upper()} {path} -> {response.status_code}")
-            if response.status_code != 401 or attempt:
-                break
-            self.refresh()
+        for retry in range(4):
+            for attempt in range(2):
+                headers = {"Authorization": f"Bearer {self._access_token()}", "Accept": "application/json"}
+                response = self._http_client.request(method.upper(), path, headers=headers, **kwargs)
+                self._logger.info(f"API call: {method.upper()} {path} -> {response.status_code}")
+                if response.status_code != 401 or attempt:
+                    break
+                self.refresh()
+            if response is not None and response.status_code in (429, 500, 502, 503, 504) and retry < 3:
+                self._logger.info(f"MailUp: retry {retry + 1} after HTTP {response.status_code} on {path}")
+                time.sleep(self._retry_sleep * (retry + 1))
+                continue
+            break
 
         try:
             response.raise_for_status()
         except HTTPStatusError as e:
-            raise MailUpException(f"{e} - {response.text[:300]}") from e
+            # Status only: response bodies of list calls contain recipient addresses.
+            raise MailUpException(f"MailUp HTTP {response.status_code} for {path}") from e
 
-        return response.json() if response.content else None
+        if not response.content:
+            return None
+        try:
+            return response.json()
+        except ValueError as e:
+            raise MailUpException(f"MailUp response is not JSON for {path}") from e
 
     def paginate(self, path: str, *, params: Dict[str, Any] = None, page_size: int = None) -> Iterator[Dict[str, Any]]:
         page_size = page_size or self.PAGE_SIZE
@@ -229,7 +242,9 @@ class MailUpClient(APIClientInterface):
         if filterby:
             params["filterby"] = filterby
         data = self.call_api(path, params=params) or {}
-        return int(data.get("TotalElementsCount", 0))
+        if "TotalElementsCount" not in data:
+            raise MailUpException(f"MailUp page has no TotalElementsCount for {path}")
+        return int(data["TotalElementsCount"])
 
     # --- Console --------------------------------------------------------
 
@@ -245,8 +260,13 @@ class MailUpClient(APIClientInterface):
         as long as the server actually returned the items in descending order.
         """
         path = f"{self.CONSOLE}/Console/List/{list_id}/Emails/SendHistory"
+        params = {"orderby": "StartDate desc"}
+        if start and end:
+            params["filterby"] = (
+                f"StartDate >= {format_filter_date(start)} && StartDate < {format_filter_date(end)}"
+            )
         try:
-            return self._collect_history(self.paginate(path, params={"orderby": "StartDate desc"}), start, end)
+            return self._collect_history(self.paginate(path, params=params), start, end)
         except MailUpException as e:
             self._logger.warning(f"MailUp: ordered send history not available for list {list_id}, full scan: {e}")
             return self._collect_history(self.paginate(path), start, end, early_stop=False)
@@ -310,10 +330,15 @@ class MailUpClient(APIClientInterface):
             "bounced": "Bounces",
             "unsubscribed": "Unsubscriptions",
         }
-        return {
-            key: int(self.call_api(f"{self.STATS}/Message/{message_id}/Count/{endpoint}") or 0)
-            for key, endpoint in endpoints.items()
-        }
+        out = {}
+        for key, endpoint in endpoints.items():
+            value = self.call_api(f"{self.STATS}/Message/{message_id}/Count/{endpoint}")
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or isinstance(value, float) and value != int(value):
+                raise MailUpException(
+                    f"MailUp Count/{endpoint} for message {message_id} is not an integer"
+                )
+            out[key] = int(value)
+        return out
 
     def __repr__(self):
         return f"<{self.__class__.__name__}(client_id={self._client_id!r})>"
