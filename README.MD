@@ -50,15 +50,16 @@ Il `site_id` numerico viene tradotto in stringa leggibile (`594 -> "gio"`, `595 
 
 ## MailUp (`mailup`)
 
-Stesso backend, stesso JSON: le liste MailUp (quotidiano.net) finiscono su `/api/campaign` e `/api/stats` accanto a Piano, con il campo `source` (`piano` | `mailup`). Liste e site si scoprono da soli (nome lista → `qn`/`naz`/`rdc`/`gio`/`lux`). Il range di default è quello di Piano: dall'ultima data già in database a ieri.
+Stesso backend, stesso JSON: le liste MailUp (quotidiano.net) finiscono su `/api/campaign` e `/api/stats` accanto a Piano, con il campo `source` (`piano` | `mailup`). Liste e site si scoprono da soli (nome lista → `qn`/`naz`/`rdc`/`gio`/`lux`). Il giorno chiuso di default è oggi in Europe/Rome se sono già le 07:00, altrimenti ieri: l'invio delle 06:01 deve essere già partito.
 
 Il client HTTP è in `var/lib/mailup.py`. MailUp OAuth **non** supporta `client_credentials`: client id/secret identificano l'applicazione, l'account si autentica con utente console (`mXXXXX`) e password. Il client prova comunque `client_credentials` e, se il server lo rifiuta, usa il password grant.
 
 | Metrica | Fonte MailUp |
 |---|---|
-| sent / opened / clicked | `MailStatisticsService` `Message/{id}/Count/SendingRecipients, Views, Clicks`, sommate per giorno di invio (Europe/Rome) |
-| subscribed / unsubscribed | `Console/List/{id}/Recipients/EmailOptins` filtrato per `Optin_Date` / `Optout_Date` del giorno |
-| total_users / total_active_users | iscritti + disiscritti / iscritti della lista |
+| sent / opened / clicked / bounced | Delta fra due snapshot di `Count/SendingRecipients`, `Views`, `Clicks`, `Bounces` |
+| delivered | Delta di `SendingRecipients − Bounces` |
+| subscribed / unsubscribed | `EmailOptins` filtrato per `Optin_Date` / `Optout_Date` del giorno |
+| total_active_users | `List/{id}/Count/Recipients` (iscritti attuali). `total_users` non è più aggiornato e resta nel JSON |
 
 Configurazione (`.env`, oppure chiave `"mailup"` in `var/data/secrets.json`):
 
@@ -70,12 +71,12 @@ MAILUP_PASSWORD=...
 ```
 
 ```shell
-./manage.py mailup check                                     # verifica credenziali ed elenca le liste scoperte
-./manage.py mailup analytics -s 20261001 -e 20261031 --sync  # import nel processo corrente
-./manage.py mailup analytics                                 # via Celery, dall'ultima data importata a ieri
+./manage.py mailup_sync
+./manage.py mailup_sync --date 2026-11-08 --dry-run
+./manage.py mailup check
 ```
 
-Periodic Task Celery: `mailup.tasks.ingest_analytics`. Filtro opzionale: `GET /api/stats?source=mailup`.
+Il nome vecchio `manage.py mailup` funziona ancora e avvisa che è deprecato. Comandi, dry-run e backfill: `docs/mailup_commands.md`. Periodic Task Celery, nome invariato: `mailup.tasks.ingest_analytics`. Filtro opzionale: `GET /api/stats?source=mailup`.
 
 ---
 

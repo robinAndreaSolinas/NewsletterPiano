@@ -319,12 +319,26 @@ class MailUpClient(APIClientInterface):
     # --- Statistics -----------------------------------------------------
 
     def count_list_recipients(self, list_id: int) -> int:
-        return int(self.call_api(f"{self.STATS}/List/{list_id}/Count/Recipients") or 0)
+        value = self.call_api(f"{self.STATS}/List/{list_id}/Count/Recipients")
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise MailUpException(f"MailUp List/{list_id}/Count/Recipients is not an integer")
+        return value
+
+    def count_message_sendings(self, list_id: int, message_id: int) -> int:
+        """How many dispatches this message has. One newsletter id is sent again every day."""
+        return self.count(
+            f"{self.CONSOLE}/Console/List/{int(list_id)}/Email/{int(message_id)}/SendHistory"
+        )
 
     def get_message_stats(self, message_id: int) -> Dict[str, int]:
+        """Lifetime counts for one message.
+
+        `sent` is Count/SendingRecipients (help: recipients to whom the email has been sent).
+        `delivered` is that number minus Count/Bounces. Count/Recipients is not used: on this
+        account it has come back equal to SendingRecipients, so it is not "recapitate".
+        """
         endpoints = {
             "sent": "SendingRecipients",
-            "delivered": "Recipients",
             "opened": "Views",
             "clicked": "Clicks",
             "bounced": "Bounces",
@@ -338,6 +352,7 @@ class MailUpClient(APIClientInterface):
                     f"MailUp Count/{endpoint} for message {message_id} is not an integer"
                 )
             out[key] = int(value)
+        out["delivered"] = max(0, out["sent"] - out["bounced"])
         return out
 
     def __repr__(self):

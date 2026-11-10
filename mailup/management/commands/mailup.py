@@ -1,98 +1,73 @@
-from datetime import datetime, timedelta
+"""Deprecated name. The Celery tasks mailup.tasks.ingest_lists and ingest_analytics are unchanged."""
+from django.core.management import BaseCommand, CommandError, call_command
 
-from django.core.management import BaseCommand, CommandError
-
-from mailup.aggregate import day_bounds, sum_sent_on
-from mailup.models import Analytics, MailingList
+from mailup.models import MailingList
 from mailup.tasks import get_client, ingest_analytics, ingest_lists, parse_day
 from var.lib.mailup import MailUpException
 
 
 class Command(BaseCommand):
-    help = (
-        "MailUp ingestion. 'check' verifica le credenziali ed elenca le liste visibili (con il loro ID), "
-        "'lists' sincronizza le liste, 'analytics' importa le metriche (--start/--end YYYYMMDD, default "
-        "dall'ultima data importata a ieri). Di default i task vanno su Celery, con --sync girano nel processo."
+    help = "Deprecato. Usa mailup_sync, mailup_backfill, mailup_cleanup. Gli argomenti vecchi funzionano ancora."
+    epilog = (
+        "Esempi ancora validi:\n"
+        "  ./manage.py mailup check\n"
+        "  ./manage.py mailup analytics --end 20261108 --sync\n"
+        "  ./manage.py mailup backfill --start 20261101 --end 20261108 --dry-run\n"
     )
-
-    DATE_FORMAT = "%Y%m%d"
 
     def add_arguments(self, parser):
         parser.add_argument("type", choices=["check", "lists", "analytics", "backfill"])
-        parser.add_argument("--start", "-s", default=None, help="data inizio YYYYMMDD")
-        parser.add_argument("--end", "-e", default=None, help="data fine YYYYMMDD, default ieri")
-        parser.add_argument("--sync", action="store_true", help="esegue il task nel processo corrente")
-        parser.add_argument("--apply", action="store_true", help="(solo backfill) scrive. Senza, è un dry-run")
+        parser.add_argument("--start", "-s", default=None)
+        parser.add_argument("--end", "-e", default=None)
+        parser.add_argument("--sync", action="store_true", help="Ignorato: il comando gira nel processo.")
+        parser.add_argument("--dry-run", action="store_true")
+        parser.add_argument("--yes", action="store_true")
 
     def handle(self, *args, **options):
-        if options["type"] == "check":
+        self.stdout.write(self.style.WARNING(
+            "Deprecato: preferisci mailup_sync, mailup_backfill o mailup_cleanup. "
+            "mailup.tasks.ingest_analytics resta il nome della periodic task."
+        ))
+        kind = options["type"]
+        if kind == "check":
             return self._check()
-
-        if options["type"] == "backfill":
-            return self._backfill(options)
-
-        if options["type"] == "lists":
-            return self._run(ingest_lists, options["sync"])
-
-        try:
-            start = parse_day(options["start"])
-            end = parse_day(options["end"])
-        except ValueError as e:
-            raise CommandError(str(e))
-        if start and end and start > end:
-            raise CommandError("start non può essere successiva a end")
-
-        self._run(
-            ingest_analytics,
-            options["sync"],
-            start.strftime(self.DATE_FORMAT) if start else None,
-            end.strftime(self.DATE_FORMAT) if end else None,
-        )
-
-    def _backfill(self, options):
-        """Show per-day sent from send history. Writes only with --apply, and only `sent`/`delivered` on rows that already exist."""
-        try:
-            start = parse_day(options["start"])
-            end = parse_day(options["end"])
-        except ValueError as e:
-            raise CommandError(str(e))
+        if kind == "lists":
+            if options["dry_run"]:
+                self.stdout.write("[DRY RUN] lists leggerebbe le liste e non scriverebbe. Usa mailup_sync --dry-run.")
+                return
+            ingest_lists()
+            self.stdout.write(self.style.SUCCESS("Liste allineate."))
+            return
+        if kind == "analytics":
+            try:
+                if options["start"]:
+                    parse_day(options["start"])
+                end = parse_day(options["end"]) if options["end"] else None
+            except ValueError as e:
+                raise CommandError(str(e))
+            result = ingest_analytics(
+                start=options["start"],
+                end=end.strftime("%Y%m%d") if end else None,
+                dry_run=options["dry_run"],
+            )
+            prefix = "[DRY RUN] " if options["dry_run"] else ""
+            self.stdout.write(f"{prefix}{result['date']} failed={result['failed']}")
+            if result["failed"]:
+                raise CommandError(f"Fetch fallito per {result['failed']}")
+            self.stdout.write(self.style.SUCCESS(f"{prefix}Fatto."))
+            return
+        start = _compact_to_iso(options["start"], "--start")
+        end = _compact_to_iso(options["end"], "--end")
         if not start or not end:
             raise CommandError("backfill richiede --start e --end")
-        if start > end:
-            raise CommandError("start non può essere successiva a end")
-
-        mode = "APPLY (solo sent sulle righe già presenti)" if options["apply"] else "DRY-RUN (nessuna scrittura)"
-        self.stdout.write(self.style.NOTICE(mode))
-        self.stdout.write("opened, clicked, subscribed, unsubscribed non sono ricostruibili per i giorni passati e non vengono toccati.")
-
-        written = 0
-        with get_client() as client:
-            for ml in MailingList.objects.filter(active=True):
-                window_start, _ = day_bounds(start)
-                _, window_end = day_bounds(end)
-                try:
-                    sendings = client.get_send_history(ml.list_id, window_start, window_end)
-                except MailUpException as e:
-                    raise CommandError(f"MailUp lista {ml.list_id}: {e}")
-                day = start
-                while day <= end:
-                    sent = sum_sent_on(sendings, day)
-                    current = Analytics.objects.filter(mailing_list=ml, date=day).first()
-                    self.stdout.write(
-                        f"{ml.name} {day} sent_attuale={current.sent if current else 'assente'} "
-                        f"sent_da_storico={sent if sent is not None else 'sconosciuto'}"
-                    )
-                    if options["apply"] and sent is not None and current is not None:
-                        current.sent = sent
-                        note = "backfill sent=SendHistory.Recipient; delivered/opened/clicked/subscribed lasciati com'erano"
-                        current.provenance = f"{current.provenance} | {note}".strip(" |")
-                        current.save(update_fields=["sent", "provenance"])
-                        written += 1
-                    day += timedelta(days=1)
-        if not options["apply"]:
-            self.stdout.write(self.style.SUCCESS("Dry-run finito, nessuna riga scritta."))
-        else:
-            self.stdout.write(self.style.SUCCESS(f"Aggiornate {written} righe già presenti."))
+        call_command(
+            "mailup_backfill",
+            start=start,
+            end=end,
+            dry_run=options["dry_run"],
+            yes=options["yes"],
+            stdout=self.stdout,
+        )
 
     def _check(self):
         active = set(MailingList.objects.filter(active=True).values_list("list_id", flat=True))
@@ -102,22 +77,18 @@ class Command(BaseCommand):
                 lists = client.get_lists()
         except MailUpException as e:
             raise CommandError(f"MailUp: {e}")
-
         self.stdout.write(self.style.SUCCESS(f"Autenticazione OK, {len(lists)} liste visibili (tutte importate):"))
         for item in lists:
             lowered = {k.lower(): v for k, v in item.items()}
             flag = "*" if lowered.get("idlist") in active else " "
             self.stdout.write(f" {flag} {lowered.get('idlist'):>6}  {lowered.get('name')}")
-        self.stdout.write("(* = già presente e attiva nel database)")
 
-    def _run(self, task, sync, *args):
-        name = task.name.rsplit(".", 1)[-1]
-        if sync:
-            self.stdout.write(self.style.NOTICE(f"Eseguo '{name}' nel processo corrente {args or ''}"))
-            started = datetime.now()
-            result = task(*args)
-            self.stdout.write(self.style.SUCCESS(f"'{name}' completato in {datetime.now() - started}: {result}"))
-            return
 
-        result = task.delay(*args)
-        self.stdout.write(self.style.SUCCESS(f"Task '{name}' schedulato su Celery (id={result.id})"))
+def _compact_to_iso(value, label):
+    if not value:
+        return None
+    try:
+        day = parse_day(value)
+    except ValueError as e:
+        raise CommandError(f"{label} non valida: '{value}'. Formato atteso: YYYYMMDD") from e
+    return day.isoformat()

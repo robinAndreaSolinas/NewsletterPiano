@@ -157,11 +157,12 @@ def ingest_lists():
             active = list(models.MailingList.objects.filter(active=True))
             for ml in active:
                 try:
+                    # List/{id}/Count/Recipients is the current subscribed count (help: "subscribed recipient").
+                    # total_users stays untouched: it is still in the API JSON and is not updated here.
                     ml.total_active_users = client.count_list_recipients(ml.list_id)
-                    ml.total_users = client.count_all_recipients(ml.list_id)
                 except MailUpException as e:
-                    _logger.warning(f"MailUp: unable to count users of list {ml.list_id}: {e}")
-            models.MailingList.objects.bulk_update(active, fields=["total_users", "total_active_users"])
+                    _logger.warning(f"MailUp: unable to count active users of list {ml.list_id}: {e}")
+            models.MailingList.objects.bulk_update(active, fields=["total_active_users"])
 
         _logger.info(f"MailUp: synced {len(bulk_lists)} lists, {len(active)} active")
         return [ml.list_id for ml in active]
@@ -169,176 +170,219 @@ def ingest_lists():
         connections.close_all()
 
 
-def _message_ids(client: MailUpClient, ml: models.MailingList, sendings) -> set[int]:
+def excluded_message_ids() -> set[int]:
+    raw = settings.MAILUP.get("EXCLUDED_MESSAGE_IDS") or ""
+    if isinstance(raw, (list, tuple, set)):
+        values = raw
+    else:
+        values = str(raw).replace(";", ",").split(",")
     ids = set()
-    for sending in sendings:
-        message_id = _get(sending, "idMessage")
-        if message_id is not None:
-            ids.add(int(message_id))
-    for item in client.paginate(f"{client.CONSOLE}/Console/List/{ml.list_id}/Emails"):
-        message_id = _get(item, "idMessage")
-        if message_id is not None:
-            ids.add(int(message_id))
-    ids.update(
-        models.MetricSnapshot.objects.filter(mailing_list=ml).values_list("message_id", flat=True)
-    )
+    for value in values:
+        text = str(value).strip()
+        if text:
+            ids.add(int(text))
     return ids
 
 
-def close_list(client: MailUpClient, ml: models.MailingList, day: datetime.date):
-    """Close one local day for one list.
+def default_close_day(moment: datetime.datetime = None) -> datetime.date:
+    moment = moment or timezone.localtime()
+    if timezone.is_naive(moment):
+        moment = timezone.make_aware(moment, timezone.get_current_timezone())
+    return aggregate.close_day(moment, aggregate.ROME)
 
-    Does not delete other days. Returns None when a required call fails and writes
-    no public row. The first successful close stores the lifetime snapshot only:
-    that total is not a day, so Analytics is left untouched.
-    """
-    start, end = day_bounds(day)
-    try:
-        sendings = client.get_send_history(ml.list_id, start, end)
-        sent = aggregate.sum_sent_on(sendings, day)
-        if sent is None:
-            _logger.error(f"MailUp: list {ml.list_id} {day} send history has no recipient count; day not stored")
-            return None
-        message_ids = _message_ids(client, ml, sendings)
-        subscribed = client.count_optins(ml.list_id, start, end)
-        unsubscribed = client.count_optins(ml.list_id, start, end, field="Optout_Date")
-        current = {message_id: client.get_message_stats(message_id) for message_id in message_ids}
-    except MailUpException as e:
-        _logger.error(f"MailUp: list {ml.list_id} {day} not stored, fetch failed: {e}")
-        return None
 
-    now = timezone.now()
-    for message_id, counts in current.items():
-        models.MetricSnapshot.objects.update_or_create(
-            mailing_list=ml,
-            message_id=message_id,
-            captured_on=day,
-            defaults=counts,
-        )
-        stamps = [s["StartDate"] for s in sendings if int(_get(s, "idMessage") or 0) == message_id]
-        try:
-            info = client.get_message(ml.list_id, message_id) or {}
-        except MailUpException as e:
-            _logger.warning(f"MailUp: subject of message {message_id} not updated: {e}")
-            info = {}
-        existing = models.Message.objects.filter(message_id=message_id).first()
-        defaults = {"mailing_list": ml, "fetched_at": now, **counts}
-        subject = (_get(info, "Subject") or "")[:500]
-        if subject:
-            defaults["subject"] = subject
-        if stamps:
-            defaults["sent_at"] = max(stamps)
-            defaults["sendings"] = len(stamps)
-        elif existing is None:
-            defaults["sent_at"] = start
-        models.Message.objects.update_or_create(message_id=message_id, defaults=defaults)
+def _snap_dict(snap: models.MetricSnapshot) -> dict:
+    return {key: getattr(snap, key) for key in aggregate.METRIC_KEYS}
 
-    opened = clicked = bounced = 0
-    dropped = {}
-    baseline = False
-    gaps = []
-    for message_id, counts in current.items():
+
+def _catalog(client: MailUpClient, ml: models.MailingList):
+    excluded = excluded_message_ids()
+    known = set(models.Message.objects.filter(mailing_list=ml).values_list("message_id", flat=True))
+    catalog = []
+    for item in client.paginate(f"{client.CONSOLE}/Console/List/{ml.list_id}/Emails"):
+        message_id = _get(item, "idMessage")
+        if message_id is None:
+            continue
+        message_id = int(message_id)
+        subject = (_get(item, "Subject") or "")[:500]
+        created = _get(item, "CreationDate") or ""
+        catalog.append((message_id, subject, created))
+        _logger.info(f"MailUp: message {message_id} subject={subject!r} created={created}")
+        if message_id not in known and message_id not in excluded:
+            _logger.warning(
+                f"MailUp: message id {message_id} never seen before "
+                f"(subject={subject!r}, created={created})"
+            )
+    return catalog, excluded
+
+
+def _day_values(ml, day, currents: dict):
+    pairs = []
+    for message_id, counts in currents.items():
         previous = (
             models.MetricSnapshot.objects
             .filter(mailing_list=ml, message_id=message_id, captured_on__lt=day)
             .order_by("-captured_on")
             .first()
         )
-        if previous is None:
-            continue
-        baseline = True
-        gap = (day - previous.captured_on).days
-        if gap > 1:
-            gaps.append(f"{message_id}:{gap}d")
-        change = aggregate.delta_counts(counts, {
-            "opened": previous.opened,
-            "clicked": previous.clicked,
-            "bounced": previous.bounced,
-        })
-        opened += change["opened"]
-        clicked += change["clicked"]
-        bounced += change["bounced"]
-        for key, value in change["dropped"].items():
-            dropped[f"{message_id}.{key}"] = value
+        gap = (day - previous.captured_on).days if previous else None
+        pairs.append((message_id, counts, _snap_dict(previous) if previous else None, gap or 0))
+    return aggregate.sum_message_deltas(pairs)
 
-    if not baseline:
-        _logger.info(
-            f"MailUp: list {ml.list_id} {day} baseline stored (sent={sent}); "
-            "no daily row, lifetime totals are not a day"
+
+def close_list(client: MailUpClient, ml: models.MailingList, day: datetime.date, *, dry_run: bool = False):
+    """Close one Rome day from cumulative snapshots.
+
+    The first snapshot of a message is stored and does not become the day's value.
+    A second run the same day keeps the snapshot already stored, so the row does not
+    collapse to zero and does not move if MailUp's cumulative grew later that day.
+    A failed fetch writes nothing.
+    """
+    start, end = day_bounds(day)
+    try:
+        catalog, excluded = _catalog(client, ml)
+        included = [row for row in catalog if row[0] not in excluded]
+        excluded_seen = [row[0] for row in catalog if row[0] in excluded]
+        for message_id in excluded_seen:
+            _logger.info(f"MailUp: message {message_id} excluded")
+
+        preexisting = {}
+        missing = []
+        for message_id, subject, created in included:
+            snap = models.MetricSnapshot.objects.filter(
+                mailing_list=ml, message_id=message_id, captured_on=day,
+            ).first()
+            if snap is not None:
+                preexisting[message_id] = _snap_dict(snap)
+            else:
+                missing.append((message_id, subject, created))
+
+        fetched = {message_id: client.get_message_stats(message_id) for message_id, _subject, _created in missing}
+        subscribed = client.count_optins(ml.list_id, start, end)
+        unsubscribed = client.count_optins(ml.list_id, start, end, field="Optout_Date")
+    except MailUpException as e:
+        _logger.error(f"MailUp: list {ml.list_id} {day} not stored, fetch failed: {e}")
+        return None
+
+    currents = {**preexisting, **fetched}
+    summed = _day_values(ml, day, currents)
+    warnings = []
+    if summed and summed["dropped"]:
+        warnings.append(f"cumulative decreased, clamped to 0: {summed['dropped']}")
+        _logger.warning(f"MailUp: list {ml.list_id} {day} {warnings[-1]}")
+    if summed and summed["gaps"]:
+        warnings.append(f"gap since previous snapshot folded into this day: {summed['gaps']}")
+        _logger.warning(f"MailUp: list {ml.list_id} {day} {warnings[-1]}")
+
+    fields = None
+    if summed is not None:
+        fields = {key: summed[key] for key in aggregate.METRIC_KEYS}
+        fields["subscribed"] = subscribed
+        fields["unsubscribed"] = unsubscribed
+
+    result = {
+        "date": day.isoformat(),
+        "excluded": excluded_seen,
+        "warnings": warnings,
+        "fields": fields,
+    }
+    if dry_run:
+        result["status"] = "dry-run" if fields else "baseline"
+        return result
+
+    now = timezone.now()
+    subjects = {message_id: subject for message_id, subject, _created in included}
+    for message_id, counts in fetched.items():
+        models.MetricSnapshot.objects.create(
+            mailing_list=ml, message_id=message_id, captured_on=day, **counts,
         )
-        return {"date": day.isoformat(), "skipped": "no-baseline", "sent": sent}
+        existing = models.Message.objects.filter(message_id=message_id).first()
+        defaults = {"mailing_list": ml, "fetched_at": now, **counts}
+        if subjects.get(message_id):
+            defaults["subject"] = subjects[message_id]
+        try:
+            defaults["sendings"] = client.count_message_sendings(ml.list_id, message_id)
+        except MailUpException as e:
+            _logger.warning(f"MailUp: sendings of message {message_id} not updated: {e}")
+        if existing is None:
+            defaults["sent_at"] = start
+        models.Message.objects.update_or_create(message_id=message_id, defaults=defaults)
 
-    delivered = aggregate.delivered_for(sent, bounced)
+    row = models.Analytics.objects.filter(mailing_list=ml, date=day).first()
+    if not fetched and row is not None:
+        result["status"] = "unchanged"
+        result["fields"] = {
+            "sent": row.sent, "delivered": row.delivered, "opened": row.opened, "clicked": row.clicked,
+            "bounced": row.bounced, "subscribed": row.subscribed, "unsubscribed": row.unsubscribed,
+        }
+        return result
+
+    if fields is None:
+        _logger.info(
+            f"MailUp: list {ml.list_id} {day} baseline stored; "
+            "lifetime totals are not written as the day"
+        )
+        result["status"] = "baseline"
+        return result
+
     note = (
-        "sent=SendHistory.Recipient sum by Europe/Rome StartDate; "
-        "opened/clicked/bounced=delta of Message Count/Views,Clicks,Bounces vs previous snapshot; "
-        "subscribed/unsubscribed=EmailOptins Optin_Date/Optout_Date; "
-        f"delivered=max(0, sent-bounced)={delivered}"
+        "sent/opened/clicked/bounced/message-unsubscribed=delta of "
+        "Count/SendingRecipients,Views,Clicks,Bounces,Unsubscriptions vs previous snapshot; "
+        "delivered=delta of (SendingRecipients-Bounces); "
+        "analytics subscribed/unsubscribed=EmailOptins Optin_Date/Optout_Date for this Rome day"
     )
-    if bounced > sent:
-        note += "; bounced today exceeds sends today (bounces of older dispatches)"
-    if dropped:
-        note += f"; cumulative decreased, clamped to 0: {dropped}"
-    if gaps:
-        note += f"; gap since previous snapshot folded into this day: {gaps}"
-
-    row, _created = models.Analytics.objects.update_or_create(
+    if warnings:
+        note += "; " + "; ".join(warnings)
+    models.Analytics.objects.update_or_create(
         mailing_list=ml,
         date=day,
-        defaults={
-            "sent": sent,
-            "delivered": delivered,
-            "opened": opened,
-            "clicked": clicked,
-            "bounced": bounced,
-            "subscribed": subscribed,
-            "unsubscribed": unsubscribed,
-            "provenance": note,
-            "fetched_at": now,
-        },
+        defaults={**fields, "provenance": note, "fetched_at": now},
     )
-    _logger.info(f"MailUp: list {ml.list_id} {day} sent={sent} opened={opened} clicked={clicked}")
-    return {"date": day.isoformat(), "id": row.id, "sent": sent, "opened": opened, "clicked": clicked}
+    _logger.info(
+        f"MailUp: list {ml.list_id} {day} sent={fields['sent']} delivered={fields['delivered']} "
+        f"opened={fields['opened']}"
+    )
+    result["status"] = "closed"
+    return result
 
 
 @shared_task
-def ingest_analytics(start=None, end=None):
-    """Close one day (default: yesterday in Europe/Rome).
+def ingest_analytics(start=None, end=None, dry_run=False, list_id=None):
+    """Close one day. Default is the Rome day whose 06:01 send has already happened.
 
     `start` is accepted so the existing Celery signature stays valid. It does not
     select a range and it does not delete rows already stored.
     """
     try:
         config = get_config()
-        day = parse_day(end) or yesterday()
+        day = parse_day(end) or default_close_day()
         if start and parse_day(start) != day:
             _logger.info(f"MailUp: not rewriting {start}..{day}; closing {day} only")
 
-        ingest_lists()
-        active = list(models.MailingList.objects.filter(active=True))
-        _logger.info(f"MailUp: closing {day} for {len(active)} lists")
+        if not dry_run:
+            ingest_lists()
+        active = models.MailingList.objects.filter(active=True)
+        if list_id is not None:
+            active = active.filter(list_id=int(list_id))
+        active = list(active)
+        _logger.info(f"MailUp: closing {day} for {len(active)} lists dry_run={dry_run}")
 
-        closed, skipped, failed = [], [], []
+        rows = []
         with get_client(config) as client:
             for ml in active:
                 try:
-                    result = close_list(client, ml, day)
+                    result = close_list(client, ml, day, dry_run=dry_run)
                 except MailUpException as e:
                     _logger.exception(f"MailUp: list {ml.list_id} failed: {e}")
-                    failed.append(ml.list_id)
+                    rows.append({"list_id": ml.list_id, "status": "failed"})
                     continue
                 if result is None:
-                    failed.append(ml.list_id)
-                elif result.get("skipped"):
-                    skipped.append(ml.list_id)
+                    rows.append({"list_id": ml.list_id, "status": "failed"})
                 else:
-                    closed.append(ml.list_id)
+                    result["list_id"] = ml.list_id
+                    rows.append(result)
 
-        return {
-            "date": day.isoformat(),
-            "closed": closed,
-            "skipped": skipped,
-            "failed": failed,
-        }
+        failed = [row["list_id"] for row in rows if row.get("status") == "failed"]
+        return {"date": day.isoformat(), "rows": rows, "failed": failed, "dry_run": dry_run}
     finally:
         connections.close_all()

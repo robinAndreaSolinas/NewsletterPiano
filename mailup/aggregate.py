@@ -2,11 +2,15 @@
 from __future__ import annotations
 
 import datetime
+from decimal import Decimal, ROUND_HALF_UP
 from zoneinfo import ZoneInfo
 
 ROME = ZoneInfo("Europe/Rome")
 
-COUNT_KEYS = ("opened", "clicked", "bounced")
+# Cumulative fields stored on MetricSnapshot. `delivered` is sent - bounced at snapshot time.
+METRIC_KEYS = ("sent", "delivered", "opened", "clicked", "bounced", "unsubscribed")
+# Newsletter goes out at 06:01 Europe/Rome. A close before 07:00 belongs to the previous day.
+SEND_READY = datetime.time(7, 0)
 
 
 def day_bounds(day: datetime.date, zone: datetime.tzinfo = ROME):
@@ -51,17 +55,36 @@ def sum_sent_on(sendings, day: datetime.date, zone: datetime.tzinfo = ROME):
     return total
 
 
-def delta_counts(current: dict, previous: dict | None):
-    """Day-over-day growth of lifetime counters.
+def close_day(moment: datetime.datetime, zone: datetime.tzinfo = ROME) -> datetime.date:
+    """Rome date whose 06:01 send is already inside `moment`.
 
-    None means there is no baseline: the caller must not store zeros.
-    A later cumulative that shrinks contributes 0 and is listed in `dropped`.
+    Before 07:00 the day's newsletter has not gone out yet, so the close belongs to yesterday.
+    """
+    if moment.tzinfo is None:
+        raise ValueError("moment must be timezone-aware")
+    local = moment.astimezone(zone)
+    if local.time() < SEND_READY:
+        return local.date() - datetime.timedelta(days=1)
+    return local.date()
+
+
+def snapshot_delivered(sent: int, bounced: int) -> int:
+    """Cumulative delivered stored on a snapshot: recipients minus bounces, never negative."""
+    return max(0, int(sent) - int(bounced))
+
+
+def delta_counts(current: dict, previous: dict | None):
+    """Growth of one message between two cumulative snapshots, on the same fields.
+
+    None means there is no baseline: the caller must not treat the lifetime total as a day.
+    A cumulative that shrinks contributes 0 and is listed in `dropped`. The new lower
+    value is what the caller stores, so the next day starts from the corrected base.
     """
     if previous is None:
         return None
     dropped = {}
     out = {}
-    for key in COUNT_KEYS:
+    for key in METRIC_KEYS:
         change = int(current[key]) - int(previous[key])
         if change < 0:
             dropped[key] = change
@@ -69,6 +92,49 @@ def delta_counts(current: dict, previous: dict | None):
         out[key] = change
     out["dropped"] = dropped
     return out
+
+
+def sum_message_deltas(pairs):
+    """Sum per-message deltas. Messages without a previous snapshot contribute nothing.
+
+    Returns None when no included message has a baseline: there is no day to write.
+    """
+    total = {key: 0 for key in METRIC_KEYS}
+    dropped = {}
+    gaps = []
+    used = 0
+    for message_id, current, previous, gap_days in pairs:
+        change = delta_counts(current, previous)
+        if change is None:
+            continue
+        used += 1
+        for key in METRIC_KEYS:
+            total[key] += change[key]
+        for key, value in change["dropped"].items():
+            dropped[f"{message_id}.{key}"] = value
+        if gap_days > 1:
+            gaps.append((message_id, gap_days))
+    if not used:
+        return None
+    total["dropped"] = dropped
+    total["gaps"] = gaps
+    return total
+
+
+def platform_rates(sent, delivered, opened, clicked, unsubscribed) -> dict:
+    """UI percentages. Denominator of opens, clicks and unsubscribes is delivered (recapitate)."""
+    def pct(part, whole):
+        if not whole:
+            return None
+        return (Decimal(part) / Decimal(whole) * Decimal(100)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    return {
+        "open_rate": pct(opened, delivered),
+        "click_rate": pct(clicked, delivered),
+        "unsub_rate": pct(unsubscribed, delivered),
+        "delivery_rate": pct(delivered, sent),
+        "click_to_open": pct(clicked, opened),
+    }
 
 
 def delivered_for(sent: int, bounced: int) -> int:
