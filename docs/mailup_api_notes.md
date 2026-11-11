@@ -54,8 +54,8 @@ Il CSV di controllo (`tests/fixtures/mailup_1390_sendingreport.csv`) è un expor
 | Message.sent / snapshot.sent | Destinatari totali, cumulativo di tutti gli invii | `Message/{id}/Count/SendingRecipients` | Help WCF: «recipients to whom the specified email has been sent». Nessuna data. |
 | Message.delivered / snapshot.delivered | Recapitate | Non esiste un COUNT Delivered. Salvato come `max(0, SendingRecipients − Bounces)` | Glossario: Delivered = Sent − bounces. https://helpmailup.atlassian.net/wiki/spaces/MUG/pages/36871152/Statistics+Glossary |
 | Message.bounced | Non raggiungibili | `Count/Bounces` | «the number of bounces». Hard e soft solo nel LIST (`Type` HB, SBDF, MBSD), non nel COUNT. |
-| Message.opened | Aperture | `Count/Views` | Email Statistics: «number of opens». Non dice se sono gli unici (`opens` del CSV) o il totale (`total_opens`). |
-| Message.clicked | Click | `Count/Clicks` | «number of clicks». Stessa ambiguità unici / totale. |
+| Message.opened | Aperture uniche, numeratore del tasso di aperture | `List/Views` → `TotalElementsCount` | La console divide questo numero per le recapitate. `Count/Views` è il totale con ripetizioni (Aperture totali) e non entra nel tasso. |
+| Message.clicked | Click unici, numeratore del tasso di clic | `List/Clicks` → `TotalElementsCount` | La console divide questo numero per le recapitate. `Count/Clicks` è Clic totali. Il rapporto click/aperture è il «tasso di clic su aperture», non il tasso di clic. |
 | Message.unsubscribed | Disiscrizioni del messaggio, cumulativo | `Count/Unsubscriptions` | «number of unsubscribed recipients» di quel messaggio. Non è la colonna giornaliera della lista. |
 | Analytics.subscribed / unsubscribed | Iscritti e disiscritti della lista in quel giorno di Roma | `EmailOptins` filtrato su `Optin_Date` / `Optout_Date`, `TotalElementsCount` | Pagina filtri, date UTC `#yyyy-mm-dd HH:mm:ssZ#`. |
 | MailingList.total_active_users | Iscritti attivi attuali | `List/{id}/Count/Recipients` | Help: «Count of subscribed recipient». È lo snapshot attuale (iscritti), non gli utenti storici e non un giorno. Non include i disiscritti. La doc non elenca, su questo COUNT, i non confermati e i rimossi come voci separate. |
@@ -118,6 +118,14 @@ Giorno = data Europe/Rome. L'invio della newsletter è alle 06:01 ora di Roma (0
 
 Aperture e click che arrivano dopo il freeze dello snapshot restano sul giorno della chiusura successiva, non sulla data dell'invio.
 
-Unici contro totali: `Count/Views` e `Count/Clicks` restano il significato di Opened e Clicked. Su una newsletter rispedita ogni giorno alle stesse persone, la differenza degli unici di vita sottostima le aperture del giorno (chi ha già aperto non aumenta il cumulativo). I totali del CSV (4199 e 6590) non hanno un COUNT separato documentato. Non sono stati sostituiti agli unici.
+Tassi della console, sull'aggregato del messaggio (schermata con Recapitate 247330, Non raggiungibili 549, Aperture 4657, Aperture totali 4843, Clic 4641, Clic totali 7611, Disiscrizioni 557):
+
+- tasso di aperture = 4657 / 247330 = 1,88%. Numeratore = Aperture, non Aperture totali (4843 / 247330 = 1,96%).
+- tasso di clic = 4641 / 247330 = 1,88%. Numeratore = Clic, non Clic totali (7611 / 247330 = 3,08%).
+- tasso di clic su aperture = 4641 / 4657 = 99,66%. È un altro indicatore. Il 100% visto in app era questo rapporto, calcolato sui delta giornalieri degli unici.
+- tasso di disiscrizione = 557 / 247330 = 0,23%.
+- Denominatore dei quattro tassi = Recapitate. Il tasso di recapito in card è mostrato senza decimali (99%); 247330 / (247330 + 549) = 99,78%.
+
+`List/Views` e `List/Clicks` hanno in `Items` l'indirizzo del destinatario. Il client legge solo `TotalElementsCount` e non registra gli indirizzi.
 
 `mailup_backfill` ricalcola un giorno solo se esistono lo snapshot di quel giorno e uno precedente. Altrimenti stampa `non calcolabile` e non scrive. Non inventa i giorni passati e non tocca la riga del 4 novembre da solo. Dettaglio comandi: `docs/mailup_commands.md`.

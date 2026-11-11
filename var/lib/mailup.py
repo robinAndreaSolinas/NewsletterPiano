@@ -242,9 +242,10 @@ class MailUpClient(APIClientInterface):
         if filterby:
             params["filterby"] = filterby
         data = self.call_api(path, params=params) or {}
-        if "TotalElementsCount" not in data:
+        total = data.get("TotalElementsCount")
+        if isinstance(total, bool) or not isinstance(total, int):
             raise MailUpException(f"MailUp page has no TotalElementsCount for {path}")
-        return int(data["TotalElementsCount"])
+        return total
 
     # --- Console --------------------------------------------------------
 
@@ -334,13 +335,14 @@ class MailUpClient(APIClientInterface):
         """Lifetime counts for one message.
 
         `sent` is Count/SendingRecipients (help: recipients to whom the email has been sent).
-        `delivered` is that number minus Count/Bounces. Count/Recipients is not used: on this
-        account it has come back equal to SendingRecipients, so it is not "recapitate".
+        `delivered` is that number minus Count/Bounces.
+        `opened` and `clicked` are the unique readers and unique clickers: TotalElementsCount of
+        List/Views and List/Clicks. Those are the numerators of the console rates
+        (tasso di aperture, tasso di clic), both divided by recapitate. Count/Views and
+        Count/Clicks are the totals with repeats (Aperture totali, Clic totali) and are not used.
         """
         endpoints = {
             "sent": "SendingRecipients",
-            "opened": "Views",
-            "clicked": "Clicks",
             "bounced": "Bounces",
             "unsubscribed": "Unsubscriptions",
         }
@@ -352,6 +354,8 @@ class MailUpClient(APIClientInterface):
                     f"MailUp Count/{endpoint} for message {message_id} is not an integer"
                 )
             out[key] = int(value)
+        out["opened"] = self.count(f"{self.STATS}/Message/{message_id}/List/Views")
+        out["clicked"] = self.count(f"{self.STATS}/Message/{message_id}/List/Clicks")
         out["delivered"] = max(0, out["sent"] - out["bounced"])
         return out
 

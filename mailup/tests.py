@@ -162,6 +162,14 @@ class FakeMailUp:
         if m := re.fullmatch(rf"{stats}/List/(\d+)/Count/Recipients", path):
             return httpx.Response(200, json=self.recipients.get(int(m.group(1)), 0))
 
+        if m := re.fullmatch(rf"{stats}/Message/(\d+)/List/(Views|Clicks)", path):
+            # TotalElementsCount is the unique readers / unique clickers. No recipient address.
+            key = m.group(2)
+            total = self.stats.get(int(m.group(1)), {}).get(key, 0)
+            page = self._page([], params)
+            page["TotalElementsCount"] = total
+            return httpx.Response(200, json=page)
+
         if m := re.fullmatch(rf"{stats}/Message/(\d+)/Count/(\w+)", path):
             return httpx.Response(200, json=self.stats.get(int(m.group(1)), {}).get(m.group(2), 0))
 
@@ -721,6 +729,16 @@ class AggregateTest(SimpleTestCase):
         self.assertEqual(str(rates["unsub_rate"]), "0.21")
         self.assertEqual(str(rates["delivery_rate"]), "99.79")
         self.assertEqual(str(rates["click_to_open"]), "99.58")
+
+    def test_console_aggregate_rates(self):
+        # MailUp message screen: Recapitate 247330, Aperture 4657, Clic 4641, Clic totali 7611.
+        rates = aggregate.platform_rates(247879, 247330, 4657, 4641, 557)
+        self.assertEqual(str(rates["open_rate"]), "1.88")
+        self.assertEqual(str(rates["click_rate"]), "1.88")
+        self.assertEqual(str(rates["click_to_open"]), "99.66")
+        self.assertEqual(str(rates["unsub_rate"]), "0.23")
+        totals = aggregate.platform_rates(247879, 247330, 4843, 7611, 557)
+        self.assertNotEqual(str(totals["click_rate"]), "1.88")
 
     def test_fourteen_sends_are_not_multiplied_into_one_day(self):
         sends = []

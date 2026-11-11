@@ -326,8 +326,9 @@ def close_list(client: MailUpClient, ml: models.MailingList, day: datetime.date,
         return result
 
     note = (
-        "sent/opened/clicked/bounced/message-unsubscribed=delta of "
-        "Count/SendingRecipients,Views,Clicks,Bounces,Unsubscriptions vs previous snapshot; "
+        "sent/bounced/message-unsubscribed=delta of Count/SendingRecipients,Bounces,Unsubscriptions; "
+        "opened/clicked=delta of unique readers and unique clickers "
+        "(List/Views and List/Clicks TotalElementsCount), the numerators of the console rates; "
         "delivered=delta of (SendingRecipients-Bounces); "
         "analytics subscribed/unsubscribed=EmailOptins Optin_Date/Optout_Date for this Rome day"
     )
