@@ -405,14 +405,14 @@ class IngestionTest(TestCase):
         tasks.ingest_analytics(end="20261031")
 
         row = models.Analytics.objects.get(mailing_list__list_id=1, date="2026-10-31")
-        self.assertEqual((row.sent, row.opened, row.clicked, row.bounced), (0, 927, 120, 2))
+        self.assertEqual((row.sent, row.opened, row.clicked, row.bounced), (0, 0, 120, 2))
         self.assertEqual(row.delivered, 0)
         self.assertEqual((row.subscribed, row.unsubscribed), (1, 1))
         self.assertIn("SendingRecipients", row.provenance)
         self.assertFalse(models.Analytics.objects.filter(date="2026-10-30").exists())
 
         sera = models.Analytics.objects.get(mailing_list__list_id=2, date="2026-10-31")
-        self.assertEqual((sera.sent, sera.opened, sera.clicked), (0, 200, 20))
+        self.assertEqual((sera.sent, sera.opened, sera.clicked), (0, 0, 20))
 
     def test_ingest_is_idempotent(self):
         tasks.ingest_analytics(end="20261030")
@@ -420,11 +420,11 @@ class IngestionTest(TestCase):
         tasks.ingest_analytics(end="20261031")
         tasks.ingest_analytics(end="20261031")
         self.assertEqual(models.Analytics.objects.filter(mailing_list__list_id=1, date="2026-10-31").count(), 1)
-        self.assertEqual(models.Analytics.objects.get(mailing_list__list_id=1, date="2026-10-31").opened, 970)
+        self.assertEqual(models.Analytics.objects.get(mailing_list__list_id=1, date="2026-10-31").opened, 0)
         self.fake.stats[101]["Views"] = 999
         tasks.ingest_analytics(end="20261031")
-        self.assertEqual(models.Analytics.objects.get(mailing_list__list_id=1, date="2026-10-31").opened, 970)
-        self.assertEqual(models.Message.objects.get(message_id=101).opened, 450)
+        self.assertEqual(models.Analytics.objects.get(mailing_list__list_id=1, date="2026-10-31").opened, 0)
+        self.assertEqual(models.Message.objects.get(message_id=101).opened, 0)
         self.assertEqual(models.MetricSnapshot.objects.filter(message_id=101, captured_on="2026-10-31").count(), 1)
 
     def test_failed_fetch_does_not_write_zeros(self):
@@ -446,7 +446,7 @@ class IngestionTest(TestCase):
         self.fake.stats[102]["Views"] = 100
         tasks.ingest_analytics(end="20261031")
         row = models.Analytics.objects.get(mailing_list__list_id=1, date="2026-10-31")
-        self.assertEqual(row.opened, 600)
+        self.assertEqual(row.opened, 0)
         self.assertGreaterEqual(row.opened, 0)
         self.assertIn("clamped to 0", row.provenance)
 
@@ -457,7 +457,7 @@ class IngestionTest(TestCase):
         tasks.ingest_analytics(end="20261031")
         row = models.Analytics.objects.get(mailing_list__list_id=1, date="2026-10-31")
         self.assertEqual(row.sent, 0)
-        self.assertEqual((row.opened, row.clicked), (2388, 1915))
+        self.assertEqual((row.opened, row.clicked), (0, 1915))
         self.assertLessEqual(row.delivered, row.sent)
 
     def test_screenshot_totals_are_not_written_on_one_day(self):

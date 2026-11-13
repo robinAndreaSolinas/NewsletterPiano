@@ -277,9 +277,8 @@ def close_list(client: MailUpClient, ml: models.MailingList, day: datetime.date,
     fields = None
     if summed is not None:
         fields = {key: summed[key] for key in aggregate.METRIC_KEYS}
-        # Aperture and Clic on the console are the unique totals, not the day's growth.
-        # The growth of those two counters is almost the same number (click-to-open ~99%).
-        fields["opened"] = sum(counts["opened"] for counts in currents.values())
+        # Opens are not counted. The API field stays 0. Clicks stay the unique total.
+        fields["opened"] = 0
         fields["clicked"] = sum(counts["clicked"] for counts in currents.values())
         fields["subscribed"] = subscribed
         fields["unsubscribed"] = unsubscribed
@@ -304,6 +303,7 @@ def close_list(client: MailUpClient, ml: models.MailingList, day: datetime.date,
         defaults = {"mailing_list": ml, "fetched_at": now, **counts}
         if subjects.get(message_id):
             defaults["subject"] = subjects[message_id]
+        defaults["opened"] = 0
         defaults["sendings"] = 0
         if existing is None:
             defaults["sent_at"] = start
@@ -328,8 +328,8 @@ def close_list(client: MailUpClient, ml: models.MailingList, day: datetime.date,
 
     note = (
         "sent/bounced/message-unsubscribed=delta of Count/SendingRecipients,Bounces,Unsubscriptions; "
-        "opened/clicked=unique readers and unique clickers now "
-        "(List/Views and List/Clicks TotalElementsCount), not the day's growth; "
+        "opened=0 (opens are not counted); "
+        "clicked=unique clickers now (List/Clicks TotalElementsCount); "
         "delivered=delta of (SendingRecipients-Bounces); "
         "analytics subscribed/unsubscribed=EmailOptins Optin_Date/Optout_Date for this Rome day"
     )
@@ -358,7 +358,8 @@ def drop_unrelated_nov4_row():
     ).delete()
     if deleted:
         _logger.info("MailUp: removed 2026-11-04 analytics (other newsletters)")
-    models.Message.objects.update(sendings=0)
+    models.Analytics.objects.update(opened=0)
+    models.Message.objects.update(opened=0, sendings=0)
 
 
 def ingest_analytics(start=None, end=None, dry_run=False, list_id=None):
