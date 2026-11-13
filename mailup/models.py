@@ -30,7 +30,7 @@ class Message(models.Model):
     message_id = models.IntegerField(unique=True)
     subject = models.CharField(max_length=500, blank=True, default="")
     sent_at = models.DateTimeField()
-    sendings = models.IntegerField(default=1)
+    sendings = models.IntegerField(default=0)
     sent = models.BigIntegerField(default=0)
     delivered = models.BigIntegerField(default=0)
     opened = models.BigIntegerField(default=0)

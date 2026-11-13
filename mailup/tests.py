@@ -16,6 +16,7 @@ from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.management import call_command, CommandError
 from django.test import TestCase, SimpleTestCase, override_settings
+from django.utils import timezone
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
 
@@ -370,6 +371,22 @@ class IngestionTest(TestCase):
         self.assertEqual((qn.name, qn.active, qn.site), ("QN Mattina nuova", True, "qn"))
         self.assertFalse(models.MailingList.objects.get(list_id=3).active)
 
+    def test_nov4_other_newsletters_are_removed_and_sendings_are_zero(self):
+        tasks.ingest_lists()
+        ml = models.MailingList.objects.get(list_id=1)
+        models.Analytics.objects.create(
+            mailing_list=ml, date=datetime.date(2026, 11, 4),
+            sent=356662, delivered=356662, opened=14977, clicked=782,
+            bounced=12936, subscribed=401002, unsubscribed=365431,
+        )
+        models.Message.objects.create(
+            mailing_list=ml, message_id=1390, subject="Prima dell'Alba",
+            sent_at=timezone.now(), sendings=14,
+        )
+        tasks.ingest_analytics(end="20261030")
+        self.assertFalse(models.Analytics.objects.filter(date="2026-11-04", sent=356662).exists())
+        self.assertEqual(models.Message.objects.get(message_id=1390).sendings, 0)
+
     def test_first_close_does_not_store_lifetime_as_a_day(self):
         result = tasks.ingest_analytics(end="20261030")
         self.assertEqual(result["date"], "2026-10-30")
@@ -388,14 +405,14 @@ class IngestionTest(TestCase):
         tasks.ingest_analytics(end="20261031")
 
         row = models.Analytics.objects.get(mailing_list__list_id=1, date="2026-10-31")
-        self.assertEqual((row.sent, row.opened, row.clicked, row.bounced), (0, 7, 5, 2))
+        self.assertEqual((row.sent, row.opened, row.clicked, row.bounced), (0, 927, 120, 2))
         self.assertEqual(row.delivered, 0)
         self.assertEqual((row.subscribed, row.unsubscribed), (1, 1))
         self.assertIn("SendingRecipients", row.provenance)
         self.assertFalse(models.Analytics.objects.filter(date="2026-10-30").exists())
 
         sera = models.Analytics.objects.get(mailing_list__list_id=2, date="2026-10-31")
-        self.assertEqual((sera.sent, sera.opened), (0, 0))
+        self.assertEqual((sera.sent, sera.opened, sera.clicked), (0, 200, 20))
 
     def test_ingest_is_idempotent(self):
         tasks.ingest_analytics(end="20261030")
@@ -403,10 +420,10 @@ class IngestionTest(TestCase):
         tasks.ingest_analytics(end="20261031")
         tasks.ingest_analytics(end="20261031")
         self.assertEqual(models.Analytics.objects.filter(mailing_list__list_id=1, date="2026-10-31").count(), 1)
-        self.assertEqual(models.Analytics.objects.get(mailing_list__list_id=1, date="2026-10-31").opened, 50)
+        self.assertEqual(models.Analytics.objects.get(mailing_list__list_id=1, date="2026-10-31").opened, 970)
         self.fake.stats[101]["Views"] = 999
         tasks.ingest_analytics(end="20261031")
-        self.assertEqual(models.Analytics.objects.get(mailing_list__list_id=1, date="2026-10-31").opened, 50)
+        self.assertEqual(models.Analytics.objects.get(mailing_list__list_id=1, date="2026-10-31").opened, 970)
         self.assertEqual(models.Message.objects.get(message_id=101).opened, 450)
         self.assertEqual(models.MetricSnapshot.objects.filter(message_id=101, captured_on="2026-10-31").count(), 1)
 
@@ -429,7 +446,7 @@ class IngestionTest(TestCase):
         self.fake.stats[102]["Views"] = 100
         tasks.ingest_analytics(end="20261031")
         row = models.Analytics.objects.get(mailing_list__list_id=1, date="2026-10-31")
-        self.assertEqual(row.opened, 0)
+        self.assertEqual(row.opened, 600)
         self.assertGreaterEqual(row.opened, 0)
         self.assertIn("clamped to 0", row.provenance)
 
@@ -440,8 +457,7 @@ class IngestionTest(TestCase):
         tasks.ingest_analytics(end="20261031")
         row = models.Analytics.objects.get(mailing_list__list_id=1, date="2026-10-31")
         self.assertEqual(row.sent, 0)
-        self.assertEqual((row.opened, row.clicked), (1468, 1800))
-        self.assertGreater(row.clicked, row.opened)
+        self.assertEqual((row.opened, row.clicked), (2388, 1915))
         self.assertLessEqual(row.delivered, row.sent)
 
     def test_screenshot_totals_are_not_written_on_one_day(self):

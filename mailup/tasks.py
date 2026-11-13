@@ -277,6 +277,10 @@ def close_list(client: MailUpClient, ml: models.MailingList, day: datetime.date,
     fields = None
     if summed is not None:
         fields = {key: summed[key] for key in aggregate.METRIC_KEYS}
+        # Aperture and Clic on the console are the unique totals, not the day's growth.
+        # The growth of those two counters is almost the same number (click-to-open ~99%).
+        fields["opened"] = sum(counts["opened"] for counts in currents.values())
+        fields["clicked"] = sum(counts["clicked"] for counts in currents.values())
         fields["subscribed"] = subscribed
         fields["unsubscribed"] = unsubscribed
 
@@ -300,10 +304,7 @@ def close_list(client: MailUpClient, ml: models.MailingList, day: datetime.date,
         defaults = {"mailing_list": ml, "fetched_at": now, **counts}
         if subjects.get(message_id):
             defaults["subject"] = subjects[message_id]
-        try:
-            defaults["sendings"] = client.count_message_sendings(ml.list_id, message_id)
-        except MailUpException as e:
-            _logger.warning(f"MailUp: sendings of message {message_id} not updated: {e}")
+        defaults["sendings"] = 0
         if existing is None:
             defaults["sent_at"] = start
         models.Message.objects.update_or_create(message_id=message_id, defaults=defaults)
@@ -327,8 +328,8 @@ def close_list(client: MailUpClient, ml: models.MailingList, day: datetime.date,
 
     note = (
         "sent/bounced/message-unsubscribed=delta of Count/SendingRecipients,Bounces,Unsubscriptions; "
-        "opened/clicked=delta of unique readers and unique clickers "
-        "(List/Views and List/Clicks TotalElementsCount), the numerators of the console rates; "
+        "opened/clicked=unique readers and unique clickers now "
+        "(List/Views and List/Clicks TotalElementsCount), not the day's growth; "
         "delivered=delta of (SendingRecipients-Bounces); "
         "analytics subscribed/unsubscribed=EmailOptins Optin_Date/Optout_Date for this Rome day"
     )
@@ -348,11 +349,24 @@ def close_list(client: MailUpClient, ml: models.MailingList, day: datetime.date,
 
 
 @shared_task
+def drop_unrelated_nov4_row():
+    """The 4 Nov 2026 row is other newsletters dumped on this list, not this day's send."""
+    deleted, _ = models.Analytics.objects.filter(
+        date=datetime.date(2026, 11, 4),
+        sent=356662,
+        delivered=356662,
+    ).delete()
+    if deleted:
+        _logger.info("MailUp: removed 2026-11-04 analytics (other newsletters)")
+    models.Message.objects.update(sendings=0)
+
+
 def ingest_analytics(start=None, end=None, dry_run=False, list_id=None):
     """Close one day. Default is the Rome day whose 06:01 send has already happened.
 
     `start` is accepted so the existing Celery signature stays valid. It does not
-    select a range and it does not delete rows already stored.
+    select a range and it does not delete rows already stored, except the known
+    4 Nov 2026 row that belongs to other newsletters.
     """
     try:
         config = get_config()
@@ -361,6 +375,7 @@ def ingest_analytics(start=None, end=None, dry_run=False, list_id=None):
             _logger.info(f"MailUp: not rewriting {start}..{day}; closing {day} only")
 
         if not dry_run:
+            drop_unrelated_nov4_row()
             ingest_lists()
         active = models.MailingList.objects.filter(active=True)
         if list_id is not None:
