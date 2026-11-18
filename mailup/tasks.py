@@ -291,9 +291,11 @@ def close_list(client: MailUpClient, ml: models.MailingList, day: datetime.date,
     fields = None
     if summed is not None:
         fields = {key: summed[key] for key in aggregate.METRIC_KEYS}
-        # Opens are not counted. The API field stays 0. Clicks stay the unique total.
+        # Opens are not counted. The API field stays 0.
+        # Clicks: new unique clickers of the day (delta of List/Clicks), not the lifetime total. The MailUp API
+        # has no per-sending clicks, so this is lower than the console "Invii" view, which counts a reader
+        # again on every sending he clicks.
         fields["opened"] = 0
-        fields["clicked"] = sum(counts["clicked"] for counts in currents.values())
         fields["subscribed"] = subscribed
         fields["unsubscribed"] = unsubscribed
 
@@ -343,7 +345,7 @@ def close_list(client: MailUpClient, ml: models.MailingList, day: datetime.date,
     note = (
         "sent/bounced/message-unsubscribed=delta of Count/SendingRecipients,Bounces,Unsubscriptions; "
         "opened=0 (opens are not counted); "
-        "clicked=unique clickers now (List/Clicks TotalElementsCount); "
+        "clicked=delta of unique clickers (List/Clicks TotalElementsCount); "
         "delivered=delta of (SendingRecipients-Bounces); "
         "analytics subscribed/unsubscribed=EmailOptins Optin_Date/Optout_Date for this Rome day"
     )

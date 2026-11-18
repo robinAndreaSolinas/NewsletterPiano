@@ -406,14 +406,14 @@ class IngestionTest(TestCase):
         tasks.ingest_analytics(end="20261031")
 
         row = models.Analytics.objects.get(mailing_list__list_id=1, date="2026-10-31")
-        self.assertEqual((row.sent, row.opened, row.clicked, row.bounced), (0, 0, 120, 2))
+        self.assertEqual((row.sent, row.opened, row.clicked, row.bounced), (0, 0, 5, 2))  # clic 50 -> 55
         self.assertEqual(row.delivered, 0)
         self.assertEqual((row.subscribed, row.unsubscribed), (1, 1))
         self.assertIn("SendingRecipients", row.provenance)
         self.assertFalse(models.Analytics.objects.filter(date="2026-10-30").exists())
 
         sera = models.Analytics.objects.get(mailing_list__list_id=2, date="2026-10-31")
-        self.assertEqual((sera.sent, sera.opened, sera.clicked), (0, 0, 20))
+        self.assertEqual((sera.sent, sera.opened, sera.clicked), (0, 0, 0))  # nessun clic nuovo
 
     def test_ingest_is_idempotent(self):
         tasks.ingest_analytics(end="20261030")
@@ -458,7 +458,7 @@ class IngestionTest(TestCase):
         tasks.ingest_analytics(end="20261031")
         row = models.Analytics.objects.get(mailing_list__list_id=1, date="2026-10-31")
         self.assertEqual(row.sent, 0)
-        self.assertEqual((row.opened, row.clicked), (0, 1915))
+        self.assertEqual((row.opened, row.clicked), (0, 1800))  # 1850 - 50: nuovi clic unici del giorno
         self.assertLessEqual(row.delivered, row.sent)
 
     def test_screenshot_totals_are_not_written_on_one_day(self):
