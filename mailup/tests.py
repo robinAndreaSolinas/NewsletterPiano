@@ -5,6 +5,7 @@ import json
 import os
 import re
 import unittest
+import unittest.mock
 from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
@@ -868,7 +869,7 @@ class ReconstructedDayTests(TestCase):
             mailing_list=ml, date=day, sent=34904, delivered=34897,
             provenance=f"{tasks.RECONSTRUCTED_PREFIX}: test",
         )
-        client = mock.Mock()
+        client = unittest.mock.Mock()
         result = tasks.close_list(client, ml, day)
         self.assertEqual(result["status"], "kept")
         self.assertEqual(result["fields"]["sent"], 34904)
