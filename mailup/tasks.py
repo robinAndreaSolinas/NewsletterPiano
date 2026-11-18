@@ -362,6 +362,7 @@ def drop_unrelated_nov4_row():
     models.Message.objects.update(opened=0, sendings=0)
 
 
+@shared_task
 def ingest_analytics(start=None, end=None, dry_run=False, list_id=None):
     """Close one day. Default is the Rome day whose 06:01 send has already happened.
 

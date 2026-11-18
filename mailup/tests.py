@@ -851,3 +851,10 @@ def _redact(value):
     if isinstance(value, list):
         return [_redact(item) for item in value]
     return value
+
+
+class CeleryRegistrationTests(SimpleTestCase):
+    def test_tasks_used_by_beat_are_celery_tasks(self):
+        """The beat entry "Ingest Mailup" calls mailup.tasks.ingest_analytics: it must be a registered task."""
+        self.assertTrue(hasattr(tasks.ingest_analytics, "delay"))
+        self.assertTrue(hasattr(tasks.ingest_lists, "delay"))
