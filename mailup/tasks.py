@@ -230,6 +230,10 @@ def _day_values(ml, day, currents: dict):
     return aggregate.sum_message_deltas(pairs)
 
 
+# Righe giornaliere ricostruite dopo un'interruzione del job: il job non le riscrive.
+RECONSTRUCTED_PREFIX = "RICOSTRUITO"
+
+
 def close_list(client: MailUpClient, ml: models.MailingList, day: datetime.date, *, dry_run: bool = False):
     """Close one Rome day from cumulative snapshots.
 
@@ -239,6 +243,16 @@ def close_list(client: MailUpClient, ml: models.MailingList, day: datetime.date,
     A failed fetch writes nothing.
     """
     start, end = day_bounds(day)
+    kept = models.Analytics.objects.filter(
+        mailing_list=ml, date=day, provenance__startswith=RECONSTRUCTED_PREFIX,
+    ).first()
+    if kept is not None:
+        # Giorno ricostruito a mano (invii esatti da SendHistory): non va sovrascritto né usato come snapshot.
+        _logger.info(f"MailUp: list {ml.list_id} {day} is reconstructed, kept as is")
+        return {"date": day.isoformat(), "status": "kept", "excluded": [], "warnings": [], "fields": {
+            "sent": kept.sent, "delivered": kept.delivered, "opened": kept.opened, "clicked": kept.clicked,
+            "bounced": kept.bounced, "subscribed": kept.subscribed, "unsubscribed": kept.unsubscribed,
+        }}
     try:
         catalog, excluded = _catalog(client, ml)
         included = [row for row in catalog if row[0] not in excluded]

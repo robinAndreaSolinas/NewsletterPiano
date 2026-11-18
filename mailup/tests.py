@@ -858,3 +858,32 @@ class CeleryRegistrationTests(SimpleTestCase):
         """The beat entry "Ingest Mailup" calls mailup.tasks.ingest_analytics: it must be a registered task."""
         self.assertTrue(hasattr(tasks.ingest_analytics, "delay"))
         self.assertTrue(hasattr(tasks.ingest_lists, "delay"))
+
+
+class ReconstructedDayTests(TestCase):
+    def test_close_list_keeps_reconstructed_rows(self):
+        ml = models.MailingList.objects.create(list_id=18, name="QNMedia", site="qn")
+        day = datetime.date(2026, 11, 16)
+        models.Analytics.objects.create(
+            mailing_list=ml, date=day, sent=34904, delivered=34897,
+            provenance=f"{tasks.RECONSTRUCTED_PREFIX}: test",
+        )
+        client = mock.Mock()
+        result = tasks.close_list(client, ml, day)
+        self.assertEqual(result["status"], "kept")
+        self.assertEqual(result["fields"]["sent"], 34904)
+        client.assert_not_called()
+        self.assertFalse(models.MetricSnapshot.objects.filter(captured_on=day).exists())
+
+
+class CheckSchedulerTests(TestCase):
+    def test_fails_when_a_scheduled_task_is_not_registered(self):
+        from django.core.management import call_command, CommandError
+        from django_celery_beat.models import CrontabSchedule, PeriodicTask
+
+        cron = CrontabSchedule.objects.create(minute="30", hour="0")
+        PeriodicTask.objects.create(name="Ingest Mailup", task="mailup.tasks.ingest_analytics", crontab=cron)
+        call_command("check_scheduler")
+        PeriodicTask.objects.create(name="Rotto", task="mailup.tasks.non_esiste", crontab=cron)
+        with self.assertRaises(CommandError):
+            call_command("check_scheduler")
