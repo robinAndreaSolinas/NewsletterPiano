@@ -208,8 +208,8 @@ MAILUP = {
     "PASSWORD": os.getenv("MAILUP_PASSWORD"),
     # Issued by the one-time OAuth authorization (LogOn). Password grant alone is not authorized on this account.
     "REFRESH_TOKEN": os.getenv("MAILUP_REFRESH_TOKEN"),
-    # Test and error messages. Not hardcoded in the fetch: override with MAILUP_EXCLUDED_MESSAGE_IDS=1400,1388
-    "EXCLUDED_MESSAGE_IDS": os.getenv("MAILUP_EXCLUDED_MESSAGE_IDS", "1400,1388,1395,1398"),
+    # Test, error and welcome ("Grazie per esserti iscritto") messages. Override with MAILUP_EXCLUDED_MESSAGE_IDS=1400,1388
+    "EXCLUDED_MESSAGE_IDS": os.getenv("MAILUP_EXCLUDED_MESSAGE_IDS", "1400,1388,1395,1398,1397,1404"),
 }
 
 LOGGING = {

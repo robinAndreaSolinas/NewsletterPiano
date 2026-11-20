@@ -528,10 +528,10 @@ class IngestionTest(TestCase):
             (1388, "2026-11-04 05:01:00Z", 3),
             (1395, "2026-11-04 05:01:00Z", 1),
             (1398, "2026-11-04 05:01:00Z", 1),
-            (1397, "2026-11-04 05:01:00Z", 1),
+            (1408, "2026-11-04 05:01:00Z", 1),
             (1390, "2026-11-04 05:01:00Z", 35317),
         ]
-        for message_id in (1400, 1388, 1395, 1398, 1397, 1390):
+        for message_id in (1400, 1388, 1395, 1398, 1408, 1390):
             self.fake.subjects[message_id] = f"msg {message_id}"
             self.fake.stats[message_id] = dict(
                 SendingRecipients=10, Recipients=10, Views=1, Clicks=1, Bounces=1, Unsubscriptions=0,
@@ -541,7 +541,7 @@ class IngestionTest(TestCase):
         saved = set(
             models.Message.objects.filter(mailing_list__list_id=1).values_list("message_id", flat=True)
         )
-        self.assertEqual(saved, {1390, 1397})
+        self.assertEqual(saved, {1390, 1408})
         self.assertFalse(
             models.MetricSnapshot.objects.filter(mailing_list__list_id=1)
             .exclude(message_id__in=saved)
@@ -553,7 +553,7 @@ class IngestionTest(TestCase):
         self.fake.history[1] = [
             (1390, "2026-11-09 05:01:00Z", 35317),
             (1400, "2026-11-04 23:52:00Z", 400945),
-            (1397, "2026-11-09 05:01:00Z", 1),
+            (1408, "2026-11-09 05:01:00Z", 1),
         ]
         self.fake.stats[1390] = dict(
             SendingRecipients=177285, Recipients=177285, Views=3000, Clicks=2900, Bounces=400, Unsubscriptions=100,
@@ -561,7 +561,7 @@ class IngestionTest(TestCase):
         self.fake.stats[1400] = dict(
             SendingRecipients=400945, Recipients=400945, Views=1, Clicks=1, Bounces=15074, Unsubscriptions=0,
         )
-        self.fake.stats[1397] = dict(
+        self.fake.stats[1408] = dict(
             SendingRecipients=5, Recipients=5, Views=1, Clicks=0, Bounces=0, Unsubscriptions=0,
         )
         tasks.ingest_lists()
@@ -577,7 +577,7 @@ class IngestionTest(TestCase):
         self.assertEqual(row.clicked, 4007 - 2900)
         self.assertEqual(row.unsubscribed, 435 - 100)
         self.assertEqual(row.message.name, "Messaggio 1390")  # nessun Subject: nome di ripiego
-        other = models.MessageAnalytics.objects.get(message__message_id=1397, date="2026-11-09")
+        other = models.MessageAnalytics.objects.get(message__message_id=1408, date="2026-11-09")
         self.assertEqual((other.sent, other.bounced), (0, 0))
         self.assertFalse(models.MessageAnalytics.objects.filter(message__message_id=1400).exists())
         self.assertEqual(row.delivered, row.sent - row.bounced)
