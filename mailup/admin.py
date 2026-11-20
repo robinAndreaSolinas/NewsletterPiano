@@ -1,7 +1,7 @@
 from django.contrib import admin
 
 from lib.admin import ReadOnlyAdmin
-from mailup.models import MailingList, Message, Analytics
+from mailup.models import MailingList, Message, MessageAnalytics, Analytics
 
 
 @admin.register(MailingList)
@@ -17,6 +17,14 @@ class ReadOnlyMessageAdmin(ReadOnlyAdmin):
                     'opened', 'clicked', 'bounced', 'unsubscribed', 'fetched_at')
     list_filter = ('mailing_list__name',)
     search_fields = ('subject',)
+
+
+@admin.register(MessageAnalytics)
+class ReadOnlyMessageAnalyticsAdmin(ReadOnlyAdmin):
+    list_display = ('message__message_id', 'message__subject', 'mailing_list__name', 'date', 'sent', 'delivered',
+                    'clicked', 'bounced', 'unsubscribed', 'fetched_at')
+    list_filter = ('mailing_list__name', 'date')
+    search_fields = ('message__subject',)
 
 
 @admin.register(Analytics)

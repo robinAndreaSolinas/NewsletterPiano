@@ -12,7 +12,8 @@ from api.serializers import (
     MailUpCampaignSerializer,
 )
 from ingestion.models import Analytics, Campaign
-from mailup.models import Analytics as MailUpAnalytics, MailingList as MailUpList
+from mailup.models import Message as MailUpMessage, MessageAnalytics as MailUpMessageAnalytics
+from mailup.tasks import excluded_message_ids
 
 SOURCE_PARAM = OpenApiParameter(
     'source',
@@ -131,7 +132,13 @@ class CampaignViewSet(
         return Campaign.objects.filter(active=True).order_by("-fetched_at")
 
     def mailup_queryset(self):
-        return MailUpList.objects.filter(active=True).order_by("-fetched_at")
+        # One campaign per MailUp message (newsletter), test messages left out.
+        return (
+            MailUpMessage.objects.filter(mailing_list__active=True)
+            .exclude(message_id__in=excluded_message_ids())
+            .select_related("mailing_list")
+            .order_by("-fetched_at")
+        )
 
     def filter_piano_dates(self, from_date, to_date):
         return self.piano_queryset().filter(
@@ -149,7 +156,7 @@ class CampaignViewSet(
         campaign_id = kwargs.get(self.lookup_field)
         source = self.requested_source()
         piano = Campaign.objects.filter(active=True, campaign_id=campaign_id).first()
-        mailup = MailUpList.objects.filter(active=True, list_id=campaign_id).first()
+        mailup = self.mailup_queryset().filter(message_id=campaign_id).first()
 
         if source == 'mailup' or (piano is None and mailup is not None):
             if mailup is None:
@@ -178,7 +185,13 @@ class AnalyticsViewSet(
         return Analytics.objects.filter(campaign__active=True).select_related("campaign").order_by("-date")
 
     def mailup_queryset(self):
-        return MailUpAnalytics.objects.filter(mailing_list__active=True).select_related("mailing_list").order_by("-date")
+        # One row per MailUp message (newsletter) and day, not per list.
+        return (
+            MailUpMessageAnalytics.objects.filter(mailing_list__active=True)
+            .exclude(message__message_id__in=excluded_message_ids())
+            .select_related("message", "mailing_list")
+            .order_by("-date")
+        )
 
     def filter_piano_dates(self, from_date, to_date):
         return self.piano_queryset().filter(date__gte=from_date, date__lte=to_date)

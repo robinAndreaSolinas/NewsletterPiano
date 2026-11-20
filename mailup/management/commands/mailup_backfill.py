@@ -1,4 +1,4 @@
-"""Recompute daily rows from snapshots already stored. It cannot invent a past cumulative."""
+"""Recompute daily message rows from snapshots already stored. It cannot invent a past cumulative."""
 from datetime import timedelta
 
 from django.core.management import BaseCommand, CommandError
@@ -6,15 +6,14 @@ from django.utils import timezone
 
 from mailup import aggregate
 from mailup.cli import confirm, ensure_not_future, parse_iso_date, write_backup
-from mailup.models import Analytics, MailingList, MetricSnapshot
+from mailup.models import MailingList, MessageAnalytics, MetricSnapshot
 from mailup import tasks as mailup_tasks
-from var.lib.mailup import MailUpException
 
 
 class Command(BaseCommand):
     help = (
-        "Ricalcola le righe giornaliere dagli snapshot già salvati. "
-        "Non ricostruisce un giorno di cui non esiste lo snapshot."
+        "Ricalcola le righe giornaliere dei messaggi (newsletter) dagli snapshot già salvati. "
+        "Non ricostruisce un giorno di cui non esiste lo snapshot. Non chiama MailUp."
     )
     epilog = (
         "Esempi:\n"
@@ -50,15 +49,11 @@ class Command(BaseCommand):
         excluded = mailup_tasks.excluded_message_ids()
         prefix = "[DRY RUN] " if self.dry_run else ""
         plans = []
-        try:
-            with mailup_tasks.get_client() as client:
-                for ml in lists:
-                    day = start
-                    while day <= end:
-                        plans.append(self._plan(client, ml, day, excluded, options["message_id"]))
-                        day += timedelta(days=1)
-        except MailUpException as e:
-            raise CommandError(str(e))
+        for ml in lists:
+            day = start
+            while day <= end:
+                plans.extend(self._plan(ml, day, excluded, options["message_id"]))
+                day += timedelta(days=1)
 
         for plan in plans:
             self.stdout.write(f"{prefix}{plan['line']}")
@@ -76,40 +71,46 @@ class Command(BaseCommand):
             path = write_backup({"plans": plans})
             self.stdout.write(f"Backup: {path}")
         for plan in writable:
-            Analytics.objects.update_or_create(
-                mailing_list_id=plan["mailing_list_id"],
-                date=plan["date"],
-                defaults={**plan["fields"], "provenance": plan["provenance"]},
+            ml = MailingList.objects.get(id=plan["mailing_list_id"])
+            mailup_tasks.write_message_rows(
+                ml, plan["date"], {plan["message_id"]: {"fields": plan["fields"], "warnings": plan["warnings"]}},
+                note=plan["provenance"],
             )
         self.stdout.write(self.style.SUCCESS(f"Aggiornate {len(writable)} righe."))
 
-    def _plan(self, client, ml, day, excluded, only_message):
+    def _plan(self, ml, day, excluded, only_message):
         snaps = MetricSnapshot.objects.filter(mailing_list=ml, captured_on=day).exclude(message_id__in=excluded)
         if only_message is not None:
             snaps = snaps.filter(message_id=only_message)
         if not snaps.exists():
-            return {"line": f"{ml.name} {day} non calcolabile: nessuno snapshot", "fields": None}
-        currents = {}
-        for snap in snaps:
-            currents[snap.message_id] = {key: getattr(snap, key) for key in aggregate.METRIC_KEYS}
-        summed = mailup_tasks._day_values(ml, day, currents)
-        if summed is None:
-            return {"line": f"{ml.name} {day} non calcolabile: manca lo snapshot precedente", "fields": None}
-        start, end = mailup_tasks.day_bounds(day)
-        subscribed = client.count_optins(ml.list_id, start, end)
-        unsubscribed = client.count_optins(ml.list_id, start, end, field="Optout_Date")
-        fields = {key: summed[key] for key in aggregate.METRIC_KEYS}
-        fields["subscribed"] = subscribed
-        fields["unsubscribed"] = unsubscribed
-        current = Analytics.objects.filter(mailing_list=ml, date=day).first()
-        line = (
-            f"{ml.name} {day} sent {getattr(current, 'sent', 'assente')} -> {fields['sent']} "
-            f"delivered={fields['delivered']} bounced={fields['bounced']} opened={fields['opened']}"
-        )
-        return {
-            "line": line,
-            "fields": fields,
-            "mailing_list_id": ml.id,
-            "date": day.isoformat(),
-            "provenance": "backfill from stored snapshots; subscribed/unsubscribed=EmailOptins of that Rome day",
+            return [{"line": f"{ml.name} {day} non calcolabile: nessuno snapshot", "fields": None}]
+        currents = {
+            snap.message_id: {key: getattr(snap, key) for key in aggregate.METRIC_KEYS}
+            for snap in snaps.order_by("message_id")
         }
+        rows = mailup_tasks.message_rows(ml, day, currents)
+        plans = []
+        for message_id in currents:
+            row = rows.get(message_id)
+            if row is None:
+                plans.append({
+                    "line": f"{ml.name} msg {message_id} {day} non calcolabile: manca lo snapshot precedente",
+                    "fields": None,
+                })
+                continue
+            fields = row["fields"]
+            current = MessageAnalytics.objects.filter(message__message_id=message_id, date=day).first()
+            plans.append({
+                "line": (
+                    f"{ml.name} msg {message_id} {day} sent {getattr(current, 'sent', 'assente')} -> {fields['sent']} "
+                    f"delivered={fields['delivered']} bounced={fields['bounced']} clicked={fields['clicked']} "
+                    f"unsubscribed={fields['unsubscribed']}"
+                ),
+                "fields": fields,
+                "warnings": row["warnings"],
+                "mailing_list_id": ml.id,
+                "message_id": message_id,
+                "date": day,
+                "provenance": "backfill from stored snapshots; " + mailup_tasks.MESSAGE_PROVENANCE,
+            })
+        return plans

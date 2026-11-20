@@ -22,19 +22,19 @@ class CommandBehaviorTest(TestCase):
 
     def test_dry_run_does_not_write(self):
         before_lists = list(models.MailingList.objects.values())
-        before_rows = list(models.Analytics.objects.values())
+        before_rows = list(models.MessageAnalytics.objects.values())
         out = StringIO()
         call_command("mailup_sync", "--dry-run", stdout=out)
         self.assertIn("[DRY RUN]", out.getvalue())
         self.assertEqual(list(models.MailingList.objects.values()), before_lists)
-        self.assertEqual(list(models.Analytics.objects.values()), before_rows)
+        self.assertEqual(list(models.MessageAnalytics.objects.values()), before_rows)
 
     def test_default_sync_writes_and_a_second_run_does_not_change_it(self):
         call_command("mailup_sync", "--date", "2026-10-30")
         call_command("mailup_sync", "--date", "2026-10-31")
-        first = list(models.Analytics.objects.order_by("id").values())
+        first = list(models.MessageAnalytics.objects.order_by("id").values())
         call_command("mailup_sync", "--date", "2026-10-31")
-        second = list(models.Analytics.objects.order_by("id").values())
+        second = list(models.MessageAnalytics.objects.order_by("id").values())
         self.assertEqual(first, second)
         self.assertTrue(first)
 
@@ -99,4 +99,4 @@ class CommandBehaviorTest(TestCase):
         models.MailingList.objects.create(list_id=1, name="QN", site="qn", active=True)
         with self.assertRaises(CommandError):
             call_command("mailup_sync", "--date", "2026-10-31")
-        self.assertFalse(models.Analytics.objects.exists())
+        self.assertFalse(models.MessageAnalytics.objects.exists())

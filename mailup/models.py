@@ -50,9 +50,17 @@ class Message(models.Model):
     def __str__(self):
         return f"{self.subject or self.message_id} - {self.sent_at:%Y-%m-%d}"
 
+    @property
+    def name(self) -> str:
+        """Newsletter name in the API: the subject, or the id when MailUp has no subject."""
+        return self.subject or f"Messaggio {self.message_id}"
+
 
 class Analytics(models.Model):
-    """Daily record per list, same shape as `ingestion.Analytics` plus delivered/bounced."""
+    """Daily record per list. Legacy: no longer written and no longer served, see `MessageAnalytics`.
+
+    Kept for the history already stored and for the RICOSTRUITO days that close_list must not touch.
+    """
     mailing_list = models.ForeignKey(MailingList, on_delete=models.DO_NOTHING, null=True, related_name="analytics")
     date = models.DateField()
     sent = models.BigIntegerField(default=0)
@@ -80,6 +88,45 @@ class Analytics(models.Model):
 
     def __repr__(self):
         return f"<{self.__class__.__name__}(mailing_list={self.mailing_list}, date={self.date}, sent={self.sent}, opened={self.opened}, clicked={self.clicked}, subscribed={self.subscribed}, unsubscribed={self.unsubscribed})>"
+
+
+class MessageAnalytics(models.Model):
+    """Daily record per message (one newsletter), served by the API in place of the list rows.
+
+    Values are the growth of the message's lifetime counts between two snapshots.
+    `subscribed` stays 0: MailUp opt-ins belong to the list, not to a message.
+    `unsubscribed` is the delta of the message's Count/Unsubscriptions.
+    """
+    message = models.ForeignKey(Message, on_delete=models.CASCADE, related_name="analytics")
+    mailing_list = models.ForeignKey(MailingList, on_delete=models.CASCADE, related_name="message_analytics")
+    date = models.DateField()
+    sent = models.BigIntegerField(default=0)
+    delivered = models.BigIntegerField(default=0)
+    opened = models.BigIntegerField(default=0)
+    clicked = models.BigIntegerField(default=0)
+    bounced = models.BigIntegerField(default=0)
+    subscribed = models.BigIntegerField(default=0)
+    unsubscribed = models.BigIntegerField(default=0)
+    # Not part of the public API. Which endpoint produced the numbers.
+    provenance = models.TextField(blank=True, default="")
+    fetched_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ('-date',)
+        unique_together = ('message', 'date')
+        indexes = [
+            models.Index(fields=['mailing_list', 'date']),
+            models.Index(fields=['message', 'date']),
+        ]
+        verbose_name = 'MailUp message analytics'
+        verbose_name_plural = 'MailUp message analytics'
+
+    def __str__(self):
+        return f"{self.message} - {self.date}"
+
+    def __repr__(self):
+        return (f"<{self.__class__.__name__}(message={self.message_id}, date={self.date}, sent={self.sent}, "
+                f"clicked={self.clicked}, unsubscribed={self.unsubscribed})>")
 
 
 class MetricSnapshot(models.Model):

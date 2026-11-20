@@ -50,15 +50,18 @@ Il `site_id` numerico viene tradotto in stringa leggibile (`594 -> "gio"`, `595 
 
 ## MailUp (`mailup`)
 
-Stesso backend, stesso JSON: le liste MailUp (quotidiano.net) finiscono su `/api/campaign` e `/api/stats` accanto a Piano, con il campo `source` (`piano` | `mailup`). Liste e site si scoprono da soli (nome lista → `qn`/`naz`/`rdc`/`gio`/`lux`). Il giorno chiuso di default è oggi in Europe/Rome se sono già le 07:00, altrimenti ieri: l'invio delle 06:01 deve essere già partito.
+Stesso backend, stesso JSON: le **singole newsletter** MailUp (i messaggi, quotidiano.net) finiscono su `/api/campaign` e `/api/stats` accanto a Piano, con il campo `source` (`piano` | `mailup`). Una riga di `/api/stats` è un messaggio in un giorno; `campaign` è il Subject del messaggio (o `Messaggio <id>` se manca). In `/api/campaign` il `campaign_id` è l'id del messaggio, `mailing_list_id` la lista a cui viene inviato e `total_users`/`total_active_users` sono quelli della lista. Le analitiche per lista (`mailup.Analytics`) non vengono più scritte né servite: restano nel database come storico. Liste e site si scoprono da soli (nome lista → `qn`/`naz`/`rdc`/`gio`/`lux`). Il giorno chiuso di default è oggi in Europe/Rome se sono già le 07:00, altrimenti ieri: l'invio delle 06:01 deve essere già partito.
 
 Il client HTTP è in `var/lib/mailup.py`. MailUp OAuth **non** supporta `client_credentials`: client id/secret identificano l'applicazione, l'account si autentica con utente console (`mXXXXX`) e password. Il client prova comunque `client_credentials` e, se il server lo rifiuta, usa il password grant.
 
 | Metrica | Fonte MailUp |
 |---|---|
-| sent / opened / clicked / bounced | Delta fra due snapshot di `Count/SendingRecipients`, `Views`, `Clicks`, `Bounces` |
+| sent / bounced | Delta, per messaggio, fra due snapshot di `Count/SendingRecipients`, `Count/Bounces` |
+| clicked | Delta dei clic unici del messaggio (`List/Clicks` → `TotalElementsCount`) |
+| opened | 0: le aperture non sono conteggiate |
 | delivered | Delta di `SendingRecipients − Bounces` |
-| subscribed / unsubscribed | `EmailOptins` filtrato per `Optin_Date` / `Optout_Date` del giorno |
+| unsubscribed | Delta di `Count/Unsubscriptions` del messaggio |
+| subscribed | 0: gli opt-in appartengono alla lista, non al messaggio |
 | total_active_users | `List/{id}/Count/Recipients` (iscritti attuali). `total_users` non è più aggiornato e resta nel JSON |
 
 Configurazione (`.env`, oppure chiave `"mailup"` in `var/data/secrets.json`):

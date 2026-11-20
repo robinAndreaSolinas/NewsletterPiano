@@ -1,7 +1,7 @@
 from rest_framework import serializers
 
 from ingestion.models import Analytics, Campaign
-from mailup.models import Analytics as MailUpAnalytics, MailingList as MailUpList
+from mailup.models import Message as MailUpMessage, MessageAnalytics as MailUpMessageAnalytics
 
 
 class SiteField(serializers.Field):
@@ -63,12 +63,13 @@ class CampaignSerializer(serializers.ModelSerializer):
 
 
 class MailUpAnalyticsSerializer(serializers.ModelSerializer):
-    campaign = serializers.CharField(source="mailing_list.name", read_only=True)
+    """One MailUp message (a single newsletter) per day. `campaign` is the newsletter name."""
+    campaign = serializers.CharField(source="message.name", read_only=True)
     site = serializers.CharField(source="mailing_list.site", read_only=True)
     source = serializers.SerializerMethodField()
 
     class Meta:
-        model = MailUpAnalytics
+        model = MailUpMessageAnalytics
         fields = ("campaign",
                   "date",
                   "site",
@@ -85,13 +86,19 @@ class MailUpAnalyticsSerializer(serializers.ModelSerializer):
 
 
 class MailUpCampaignSerializer(serializers.ModelSerializer):
-    campaign_id = serializers.IntegerField(source="list_id", read_only=True)
-    mailing_list_id = serializers.IntegerField(source="list_id", read_only=True)
+    """A MailUp message is a campaign. Subscriber counts are those of the list it is sent to."""
+    campaign_id = serializers.IntegerField(source="message_id", read_only=True)
+    name = serializers.CharField(read_only=True)
+    site = serializers.CharField(source="mailing_list.site", read_only=True)
+    active = serializers.BooleanField(source="mailing_list.active", read_only=True)
+    mailing_list_id = serializers.IntegerField(source="mailing_list.list_id", read_only=True)
+    total_users = serializers.IntegerField(source="mailing_list.total_users", read_only=True)
+    total_active_users = serializers.IntegerField(source="mailing_list.total_active_users", read_only=True)
     schedule_type = serializers.SerializerMethodField()
     source = serializers.SerializerMethodField()
 
     class Meta:
-        model = MailUpList
+        model = MailUpMessage
         fields = (
                   "campaign_id",
                   "name",

@@ -8,7 +8,7 @@ from var.lib.mailup import MailUpException
 
 
 class Command(BaseCommand):
-    help = "Chiude un giorno MailUp: snapshot cumulativi e riga analytics (delta rispetto al giorno precedente)."
+    help = "Chiude un giorno MailUp: snapshot cumulativi e una riga analytics per messaggio (delta rispetto allo snapshot precedente)."
     epilog = (
         "Esempi:\n"
         "  ./manage.py mailup_sync\n"
@@ -57,20 +57,26 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING(f"{prefix}{warning}"))
         fields = row.get("fields") or {}
         if status == "baseline":
-            self.stdout.write(f"{prefix}lista {row.get('list_id')}: primo snapshot, nessuna riga del giorno (il cumulativo non è un giorno)")
+            self.stdout.write(f"{prefix}lista {row.get('list_id')}: primo snapshot dei messaggi, nessuna riga del giorno (il cumulativo non è un giorno)")
             return
         if status == "unchanged":
-            self.stdout.write(f"{prefix}lista {row.get('list_id')}: riga invariata")
+            self.stdout.write(f"{prefix}lista {row.get('list_id')}: righe dei messaggi invariate")
         elif status == "dry-run":
-            self.stdout.write(f"{prefix}lista {row.get('list_id')}: verrebbe scritta")
+            self.stdout.write(f"{prefix}lista {row.get('list_id')}: verrebbero scritte le righe dei messaggi")
         elif status == "closed":
-            self.stdout.write(self.style.SUCCESS(f"{prefix}lista {row.get('list_id')}: riga aggiornata"))
+            self.stdout.write(self.style.SUCCESS(f"{prefix}lista {row.get('list_id')}: righe dei messaggi aggiornate"))
         elif status == "failed":
             self.stdout.write(self.style.ERROR(f"{prefix}lista {row.get('list_id')}: errore"))
             return
+        for message_id, values in (row.get("messages") or {}).items():
+            self.stdout.write(
+                f"{prefix}  msg {message_id}: Sent={values.get('sent')} Delivered={values.get('delivered')} "
+                f"Bounced={values.get('bounced')} Clicked={values.get('clicked')} "
+                f"Unsubscribed={values.get('unsubscribed')}"
+            )
         if fields:
             self.stdout.write(
-                f"{prefix}Sent={fields.get('sent')} Delivered={fields.get('delivered')} "
+                f"{prefix}Totale lista (non salvato): Sent={fields.get('sent')} Delivered={fields.get('delivered')} "
                 f"Bounced={fields.get('bounced')} Opened={fields.get('opened')} "
                 f"Clicked={fields.get('clicked')} Unsubscribed={fields.get('unsubscribed')}"
             )

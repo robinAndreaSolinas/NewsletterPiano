@@ -393,6 +393,7 @@ class IngestionTest(TestCase):
         self.assertEqual(result["date"], "2026-10-30")
         self.assertEqual(result["failed"], [])
         self.assertFalse(models.Analytics.objects.exists())
+        self.assertFalse(models.MessageAnalytics.objects.exists())
         self.assertEqual(models.MetricSnapshot.objects.filter(mailing_list__list_id=1).count(), 3)
         message = models.Message.objects.get(message_id=101)
         self.assertEqual((message.sent, message.delivered, message.bounced), (1000, 990, 10))
@@ -405,14 +406,21 @@ class IngestionTest(TestCase):
         self.fake.stats[101]["Bounces"] = 12
         tasks.ingest_analytics(end="20261031")
 
-        row = models.Analytics.objects.get(mailing_list__list_id=1, date="2026-10-31")
+        # One row per message (newsletter), not one per list.
+        self.assertFalse(models.Analytics.objects.exists())
+        rows = {r.message.message_id: r for r in models.MessageAnalytics.objects.filter(date="2026-10-31")}
+        self.assertEqual(set(rows), {101, 102, 103, 201})
+        row = rows[101]
+        self.assertEqual(row.mailing_list.list_id, 1)
         self.assertEqual((row.sent, row.opened, row.clicked, row.bounced), (0, 0, 5, 2))  # clic 50 -> 55
         self.assertEqual(row.delivered, 0)
-        self.assertEqual((row.subscribed, row.unsubscribed), (1, 1))
+        # subscribed belongs to the list; unsubscribed is the message's own Count/Unsubscriptions delta
+        self.assertEqual((row.subscribed, row.unsubscribed), (0, 0))
         self.assertIn("SendingRecipients", row.provenance)
-        self.assertFalse(models.Analytics.objects.filter(date="2026-10-30").exists())
+        self.assertEqual((rows[102].clicked, rows[102].bounced), (0, 0))
+        self.assertFalse(models.MessageAnalytics.objects.filter(date="2026-10-30").exists())
 
-        sera = models.Analytics.objects.get(mailing_list__list_id=2, date="2026-10-31")
+        sera = rows[201]
         self.assertEqual((sera.sent, sera.opened, sera.clicked), (0, 0, 0))  # nessun clic nuovo
 
     def test_ingest_is_idempotent(self):
@@ -420,11 +428,11 @@ class IngestionTest(TestCase):
         self.fake.stats[101]["Views"] = 450
         tasks.ingest_analytics(end="20261031")
         tasks.ingest_analytics(end="20261031")
-        self.assertEqual(models.Analytics.objects.filter(mailing_list__list_id=1, date="2026-10-31").count(), 1)
-        self.assertEqual(models.Analytics.objects.get(mailing_list__list_id=1, date="2026-10-31").opened, 0)
+        self.assertEqual(models.MessageAnalytics.objects.filter(message__message_id=101, date="2026-10-31").count(), 1)
+        self.assertEqual(models.MessageAnalytics.objects.get(message__message_id=101, date="2026-10-31").opened, 0)
         self.fake.stats[101]["Views"] = 999
         tasks.ingest_analytics(end="20261031")
-        self.assertEqual(models.Analytics.objects.get(mailing_list__list_id=1, date="2026-10-31").opened, 0)
+        self.assertEqual(models.MessageAnalytics.objects.get(message__message_id=101, date="2026-10-31").opened, 0)
         self.assertEqual(models.Message.objects.get(message_id=101).opened, 0)
         self.assertEqual(models.MetricSnapshot.objects.filter(message_id=101, captured_on="2026-10-31").count(), 1)
 
@@ -441,12 +449,13 @@ class IngestionTest(TestCase):
         kept.refresh_from_db()
         self.assertEqual((kept.sent, kept.subscribed, kept.unsubscribed), (6, 6, 7))
         self.assertFalse(models.Analytics.objects.filter(mailing_list=ml, date="2026-10-31").exists())
+        self.assertFalse(models.MessageAnalytics.objects.filter(mailing_list=ml, date="2026-10-31").exists())
 
     def test_decreasing_cumulative_does_not_go_negative(self):
         tasks.ingest_analytics(end="20261030")
         self.fake.stats[102]["Views"] = 100
         tasks.ingest_analytics(end="20261031")
-        row = models.Analytics.objects.get(mailing_list__list_id=1, date="2026-10-31")
+        row = models.MessageAnalytics.objects.get(message__message_id=102, date="2026-10-31")
         self.assertEqual(row.opened, 0)
         self.assertGreaterEqual(row.opened, 0)
         self.assertIn("clamped to 0", row.provenance)
@@ -456,7 +465,7 @@ class IngestionTest(TestCase):
         self.fake.stats[101]["Views"] = 1868
         self.fake.stats[101]["Clicks"] = 1850
         tasks.ingest_analytics(end="20261031")
-        row = models.Analytics.objects.get(mailing_list__list_id=1, date="2026-10-31")
+        row = models.MessageAnalytics.objects.get(message__message_id=101, date="2026-10-31")
         self.assertEqual(row.sent, 0)
         self.assertEqual((row.opened, row.clicked), (0, 1800))  # 1850 - 50: nuovi clic unici del giorno
         self.assertLessEqual(row.delivered, row.sent)
@@ -487,6 +496,7 @@ class IngestionTest(TestCase):
         )
         tasks.ingest_analytics(end="20261104")
         self.assertFalse(models.Analytics.objects.filter(date="2026-11-04").exists())
+        self.assertFalse(models.MessageAnalytics.objects.filter(date="2026-11-04").exists())
         self.assertFalse(models.Message.objects.filter(message_id=1400).exists())
         self.assertTrue(models.MetricSnapshot.objects.filter(message_id=1390, captured_on="2026-11-04").exists())
         for day, subscribed, unsubscribed in (
@@ -510,6 +520,7 @@ class IngestionTest(TestCase):
         kept = models.Analytics.objects.get(mailing_list=ml, date="2026-10-30")
         self.assertEqual((kept.sent, kept.subscribed, kept.unsubscribed), (6, 6, 7))
         self.assertFalse(models.Analytics.objects.filter(date="2026-11-01").exists())
+        self.assertFalse(models.MessageAnalytics.objects.filter(date="2026-11-01").exists())
 
     def test_excluded_ids_do_not_land_in_the_database(self):
         self.fake.history[1] = [
@@ -536,7 +547,7 @@ class IngestionTest(TestCase):
             .exclude(message_id__in=saved)
             .exists()
         )
-        self.assertFalse(models.Analytics.objects.filter(date="2026-11-04").exists())
+        self.assertFalse(models.MessageAnalytics.objects.filter(date="2026-11-04").exists())
 
     def test_daily_sent_is_the_cumulative_delta_without_excluded_messages(self):
         self.fake.history[1] = [
@@ -560,9 +571,15 @@ class IngestionTest(TestCase):
         )
         self.fake.stats[1400]["SendingRecipients"] = 900000
         tasks.ingest_analytics(end="20261109")
-        row = models.Analytics.objects.get(mailing_list__list_id=1, date="2026-11-09")
+        row = models.MessageAnalytics.objects.get(message__message_id=1390, date="2026-11-09")
         self.assertEqual(row.sent, 35317)
         self.assertEqual(row.bounced, 438)
+        self.assertEqual(row.clicked, 4007 - 2900)
+        self.assertEqual(row.unsubscribed, 435 - 100)
+        self.assertEqual(row.message.name, "Messaggio 1390")  # nessun Subject: nome di ripiego
+        other = models.MessageAnalytics.objects.get(message__message_id=1397, date="2026-11-09")
+        self.assertEqual((other.sent, other.bounced), (0, 0))
+        self.assertFalse(models.MessageAnalytics.objects.filter(message__message_id=1400).exists())
         self.assertEqual(row.delivered, row.sent - row.bounced)
         self.assertNotEqual(row.sent, row.delivered)
         self.assertLess(row.delivered, row.sent)
@@ -575,9 +592,9 @@ class IngestionTest(TestCase):
         tasks.ingest_lists()
         tasks.ingest_analytics(end="20261030")
         tasks.ingest_analytics(end="20261101")
-        row = models.Analytics.objects.get(mailing_list__list_id=1, date="2026-11-01")
+        row = models.MessageAnalytics.objects.get(message__message_id=101, date="2026-11-01")
         self.assertIn("gap since previous snapshot", row.provenance)
-        self.assertFalse(models.Analytics.objects.filter(mailing_list__list_id=1, date="2026-10-31").exists())
+        self.assertFalse(models.MessageAnalytics.objects.filter(mailing_list__list_id=1, date="2026-10-31").exists())
 
     def test_start_is_ignored_and_does_not_raise(self):
         result = tasks.ingest_analytics("20261102", "20261101")
@@ -591,7 +608,7 @@ class IngestionTest(TestCase):
             self.assertIn("QN Sera", out.getvalue())
 
             call_command("mailup", "analytics", "--start", "20261030", "--end", "20261031", "--sync", stdout=out)
-            self.assertFalse(models.Analytics.objects.filter(date="2026-10-30").exists())
+            self.assertFalse(models.MessageAnalytics.objects.filter(date="2026-10-30").exists())
             self.assertIn("Deprecato", out.getvalue())
 
             ml = models.MailingList.objects.get(list_id=1)
@@ -626,11 +643,28 @@ class ApiTest(TestCase):
             sent=50, opened=10, clicked=2, subscribed=1, unsubscribed=0,
         )
 
-        active = models.MailingList.objects.create(list_id=1, name="QN Mattina", active=True, site="qn", total_users=10)
+        active = models.MailingList.objects.create(
+            list_id=1, name="QN Mattina", active=True, site="qn", total_users=10, total_active_users=7,
+        )
         inactive = models.MailingList.objects.create(list_id=3, name="Test", active=False, site="qn")
+        alba = models.Message.objects.create(
+            mailing_list=active, message_id=1390, subject="Prima dell'Alba", sent_at=timezone.now(),
+        )
+        hidden = models.Message.objects.create(mailing_list=inactive, message_id=77, subject="x", sent_at=timezone.now())
+        excluded = models.Message.objects.create(mailing_list=active, message_id=1400, sent_at=timezone.now())
+        # A legacy list row: no longer served.
+        models.Analytics.objects.create(mailing_list=active, date=datetime.date(2026, 10, 30), sent=999)
         for day in (30, 31):
-            models.Analytics.objects.create(mailing_list=active, date=datetime.date(2026, 10, day), sent=100 + day)
-        models.Analytics.objects.create(mailing_list=inactive, date=datetime.date(2026, 10, 30), sent=1)
+            models.MessageAnalytics.objects.create(
+                message=alba, mailing_list=active, date=datetime.date(2026, 10, day), sent=100 + day,
+                clicked=day, unsubscribed=2,
+            )
+        models.MessageAnalytics.objects.create(
+            message=hidden, mailing_list=inactive, date=datetime.date(2026, 10, 30), sent=1,
+        )
+        models.MessageAnalytics.objects.create(
+            message=excluded, mailing_list=active, date=datetime.date(2026, 10, 30), sent=400945,
+        )
 
     def test_requires_auth(self):
         self.assertEqual(APIClient().get("/api/stats").status_code, 401)
@@ -642,8 +676,8 @@ class ApiTest(TestCase):
         self.assertEqual(sources, {"piano", "mailup"})
         mailup = next(row for row in data["results"] if row["source"] == "mailup" and row["date"] == "2026-10-31")
         self.assertEqual(mailup, {
-            "campaign": "QN Mattina", "date": "2026-10-31", "site": "qn", "source": "mailup",
-            "sent": 131, "opened": 0, "clicked": 0, "subscribed": 0, "unsubscribed": 0,
+            "campaign": "Prima dell'Alba", "date": "2026-10-31", "site": "qn", "source": "mailup",
+            "sent": 131, "opened": 0, "clicked": 31, "subscribed": 0, "unsubscribed": 2,
         })
         piano = next(row for row in data["results"] if row["source"] == "piano")
         self.assertEqual((piano["campaign"], piano["site"], piano["sent"]), ("QN Piano", "qn", 50))
@@ -666,10 +700,14 @@ class ApiTest(TestCase):
         self.assertEqual(data["count"], 2)
         by_source = {row["source"]: row for row in data["results"]}
         self.assertEqual(by_source["piano"]["campaign_id"], 557)
-        self.assertEqual(by_source["mailup"]["campaign_id"], 1)
-        self.assertEqual(by_source["mailup"]["schedule_type"], "regular")
+        mailup = by_source["mailup"]
+        self.assertEqual((mailup["campaign_id"], mailup["name"], mailup["mailing_list_id"]),
+                         (1390, "Prima dell'Alba", 1))
+        self.assertEqual((mailup["total_users"], mailup["total_active_users"], mailup["active"]), (10, 7, True))
+        self.assertEqual(mailup["schedule_type"], "regular")
 
-        self.assertEqual(self.api.get("/api/campaign/1").json()["source"], "mailup")
+        self.assertEqual(self.api.get("/api/campaign/1390").json()["source"], "mailup")
+        self.assertEqual(self.api.get("/api/campaign/1400").status_code, 404)
         self.assertEqual(self.api.get("/api/campaign/557").json()["source"], "piano")
         self.assertEqual(self.api.get("/api/mailup/stats").status_code, 404)
 

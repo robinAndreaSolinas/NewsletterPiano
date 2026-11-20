@@ -94,31 +94,21 @@ def delta_counts(current: dict, previous: dict | None):
     return out
 
 
-def sum_message_deltas(pairs):
-    """Sum per-message deltas. Messages without a previous snapshot contribute nothing.
+def message_day(message_id, current: dict, previous: dict | None, gap_days: int):
+    """One message's row for the day: delta of its own cumulative snapshots.
 
-    Returns None when no included message has a baseline: there is no day to write.
+    Returns None without a baseline (first snapshot: the lifetime total is not a day).
+    `warnings` names a clamped decrease or a gap folded into this day.
     """
-    total = {key: 0 for key in METRIC_KEYS}
-    dropped = {}
-    gaps = []
-    used = 0
-    for message_id, current, previous, gap_days in pairs:
-        change = delta_counts(current, previous)
-        if change is None:
-            continue
-        used += 1
-        for key in METRIC_KEYS:
-            total[key] += change[key]
-        for key, value in change["dropped"].items():
-            dropped[f"{message_id}.{key}"] = value
-        if gap_days > 1:
-            gaps.append((message_id, gap_days))
-    if not used:
+    change = delta_counts(current, previous)
+    if change is None:
         return None
-    total["dropped"] = dropped
-    total["gaps"] = gaps
-    return total
+    warnings = []
+    if change["dropped"]:
+        warnings.append(f"cumulative decreased, clamped to 0: {change['dropped']}")
+    if gap_days > 1:
+        warnings.append(f"gap since previous snapshot folded into this day: {gap_days} days")
+    return {"fields": {key: change[key] for key in METRIC_KEYS}, "warnings": warnings}
 
 
 def platform_rates(sent, delivered, opened, clicked, unsubscribed) -> dict:
